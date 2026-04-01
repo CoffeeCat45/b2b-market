@@ -1,6 +1,9 @@
 import { Link, NavLink } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 function Header() {
+  const { user, logout } = useAuth();
+
   return (
     <header className="site-header">
       <div className="container header-row">
@@ -18,12 +21,26 @@ function Header() {
         </nav>
 
         <div className="header-actions">
-          <Link to="/create" className="button button-primary">
-            Разместить
-          </Link>
-          <Link to="/login" className="button button-secondary">
-            Войти
-          </Link>
+          {user ? (
+            <>
+              <span className="header-user">{user.role === "admin" ? "Админ" : user.company || user.displayName}</span>
+              <Link to="/create" className="button button-primary">
+                Управлять
+              </Link>
+              <button type="button" className="button button-secondary" onClick={logout}>
+                Выйти
+              </button>
+            </>
+          ) : (
+            <>
+              <Link to="/create" className="button button-primary">
+                Разместить
+              </Link>
+              <Link to="/login" className="button button-secondary">
+                Войти
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

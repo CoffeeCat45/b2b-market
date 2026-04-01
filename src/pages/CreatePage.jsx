@@ -1,142 +1,263 @@
-﻿import { useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
+import { useAuth } from "../context/AuthContext";
+import { apiFetch } from "../lib/api";
+import { useMarketplaceData } from "../hooks/useMarketplaceData";
 
-const initialState = {
-  type: "Заказ",
-  title: "Поставка упаковки для сети кофеен",
-  category: "Оптовые поставки",
-  city: "Екатеринбург",
-  budget: "от 250 000 ₽ до 450 000 ₽",
-  summary: "Нужен поставщик брендированной упаковки и расходных материалов для 14 точек.",
-  description:
-    "Ищем партнёра для регулярных поставок стаканов, крышек, пакетов и брендированных коробок. Важно наличие образцов, прозрачных сроков и возможности ежемесячных отгрузок.",
-  tags: "B2B, упаковка, регулярный контракт",
-};
+const emptyForm = { title: "", category: "Оптовые поставки", cityMajor: "", locationDetail: "", budgetFrom: "", budgetTo: "", summary: "", description: "", terms: "", tags: "", companyId: "" };
 
 function CreatePage() {
-  const [form, setForm] = useState(initialState);
-  const [submitted, setSubmitted] = useState(false);
+  const { user, loading } = useAuth();
+  const { orders, companies, reload } = useMarketplaceData();
+  const [searchParams] = useSearchParams();
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState(null);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [chats, setChats] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [openCreate, setOpenCreate] = useState(true);
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminSearchFocused, setAdminSearchFocused] = useState(false);
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [chatMode, setChatMode] = useState("incoming");
+  const [showChatList, setShowChatList] = useState(true);
 
-  const updateField = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
+  const loadExtras = useCallback(async () => {
+    try {
+      const [chatData, locationData] = await Promise.all([
+        apiFetch("/chats"),
+        apiFetch("/locations"),
+      ]);
+      setChats(chatData);
+      setLocations(locationData.cities || []);
+    } catch (loadError) {
+      setError(loadError.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user?.companyId) {
+      setForm((current) => ({ ...current, companyId: user.companyId }));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      loadExtras();
+    }
+  }, [user, loadExtras]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const intervalId = window.setInterval(() => {
+      loadExtras();
+    }, 4000);
+    return () => window.clearInterval(intervalId);
+  }, [user, loadExtras]);
+
+  useEffect(() => {
+    const chatCompany = searchParams.get("chatCompany");
+    const orderId = searchParams.get("orderId");
+    if (chatCompany && user?.companyId) {
+      apiFetch("/chats/open", {
+        method: "POST",
+        body: JSON.stringify({
+          companyId: chatCompany,
+          subject: orderId ? `Отклик по объявлению ${orderId}` : "Обсуждение сотрудничества",
+          message: orderId ? `Здравствуйте. Интересует ваше объявление ${orderId}.` : "",
+        }),
+      })
+        .then(async (data) => {
+          await loadExtras();
+          setActiveChatId(data.chatId);
+          setShowChatList(false);
+        })
+        .catch(() => {});
+    }
+  }, [searchParams, user, loadExtras]);
+
+  const citySuggestions = useMemo(() => {
+    const q = form.cityMajor.trim().toLowerCase();
+    if (!q) return [];
+    return locations.filter((city) => city.toLowerCase().startsWith(q)).slice(0, 6);
+  }, [form.cityMajor, locations]);
+
+  const editableOrders = useMemo(() => {
+    if (!user) return [];
+    const source = user.role === "admin" ? orders : orders.filter((item) => item.companyId === user.companyId);
+    if (!adminSearch.trim()) return source;
+    const q = adminSearch.toLowerCase();
+    return source.filter((item) => `${item.title} ${item.company}`.toLowerCase().includes(q));
+  }, [orders, user, adminSearch]);
+
+  const adminSuggestions = useMemo(() => {
+    const q = adminSearch.trim().toLowerCase();
+    if (!q || user?.role !== "admin") return [];
+    return [...new Set(orders.flatMap((item) => [item.title, item.company]).filter((item) => item.toLowerCase().includes(q)))].slice(0, 5);
+  }, [adminSearch, orders, user]);
+
+  const filteredChats = useMemo(() => {
+    if (!user?.companyId) return chats;
+    return chats.filter((chat) => {
+      const incoming = chat.initiatorCompanyId !== user.companyId;
+      return chatMode === "incoming" ? incoming : !incoming;
+    });
+  }, [chats, chatMode, user]);
+
+  const activeChat = chats.find((chat) => chat.id === activeChatId);
+
+  const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({ ...emptyForm, companyId: user?.companyId || "" });
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    setSubmitted(true);
+    setError("");
+    setStatus("");
+    try {
+      const payload = { ...form, tags: form.tags };
+      if (editingId) {
+        await apiFetch(`/orders/${editingId}`, { method: "PUT", body: JSON.stringify(payload) });
+        setStatus("Объявление обновлено.");
+      } else {
+        await apiFetch("/orders", { method: "POST", body: JSON.stringify(payload) });
+        setStatus("Объявление создано.");
+      }
+      resetForm();
+      await reload();
+    } catch (submitError) {
+      setError(submitError.message);
+    }
   };
+
+  const sendMessage = async () => {
+    if (!activeChatId || !messageDraft.trim()) return;
+    try {
+      const text = messageDraft.trim();
+      await apiFetch(`/chats/${activeChatId}/messages`, { method: "POST", body: JSON.stringify({ text }) });
+      setMessageDraft("");
+      setChats((current) =>
+        current.map((chat) =>
+          chat.id === activeChatId
+            ? {
+                ...chat,
+                messages: [
+                  ...chat.messages,
+                  {
+                    id: `local-${Date.now()}`,
+                    text,
+                    senderCompanyId: user.companyId,
+                    createdAt: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
+                  },
+                ],
+                lastSenderCompanyId: user.companyId,
+              }
+            : chat,
+        ),
+      );
+      await loadExtras();
+    } catch (messageError) {
+      setError(messageError.message);
+    }
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id);
+    setOpenCreate(true);
+    setForm({ title: item.title, category: item.category, cityMajor: item.cityMajor || item.city, locationDetail: item.locationDetail || "", budgetFrom: String(item.budgetFrom), budgetTo: String(item.budgetTo), summary: item.summary, description: item.description, terms: item.terms, tags: item.tags.join(", "), companyId: item.companyId });
+  };
+
+  const removeOrder = async (id) => {
+    try {
+      await apiFetch(`/orders/${id}`, { method: "DELETE" });
+      setStatus("Объявление удалено.");
+      await reload();
+    } catch (removeError) {
+      setError(removeError.message);
+    }
+  };
+
+  const openChat = (chatId) => {
+    setActiveChatId(chatId);
+    setShowChatList(false);
+  };
+
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
 
   return (
     <Layout>
       <section className="form-section">
-        <div className="container form-layout">
-          <div className="form-main">
-            <div className="section-heading compact form-heading">
-              <h1>Создание объявления</h1>
+        <div className="container dashboard-layout">
+          <div className="dashboard-main">
+            <div className="dashboard-toggle card">
+              <div className="card-actions">
+                <h1>{editingId ? "Редактирование объявления" : "Кабинет компании"}</h1>
+                <button type="button" className="button button-secondary" onClick={() => setOpenCreate((current) => !current)}>{openCreate ? "Свернуть форму" : "Развернуть форму"}</button>
+              </div>
             </div>
 
-            <form className="card listing-form" onSubmit={handleSubmit}>
-              <div className="form-grid">
-                <label className="field field-type">
-                  <span>Тип объявления</span>
-                  <select value={form.type} onChange={(event) => updateField("type", event.target.value)}>
-                    <option>Заказ</option>
-                    <option>Предложение</option>
-                  </select>
-                </label>
-
-                <label className="field">
-                  <span>Категория</span>
-                  <select
-                    value={form.category}
-                    onChange={(event) => updateField("category", event.target.value)}
-                  >
-                    <option>IT услуги</option>
-                    <option>Логистика</option>
-                    <option>Производство</option>
-                    <option>Маркетинг</option>
-                    <option>Оптовые поставки</option>
-                    <option>Строительство</option>
-                  </select>
-                </label>
-
-                <label className="field field-wide">
-                  <span>Название</span>
-                  <input
-                    value={form.title}
-                    onChange={(event) => updateField("title", event.target.value)}
-                    placeholder="Поставка упаковки для сети кофеен"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Город</span>
-                  <input
-                    value={form.city}
-                    onChange={(event) => updateField("city", event.target.value)}
-                    placeholder="Екатеринбург"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Бюджет</span>
-                  <input
-                    value={form.budget}
-                    onChange={(event) => updateField("budget", event.target.value)}
-                    placeholder="от 250 000 ₽"
-                  />
-                </label>
-
-                <label className="field field-wide">
-                  <span>Краткое описание</span>
-                  <input
-                    value={form.summary}
-                    onChange={(event) => updateField("summary", event.target.value)}
-                    placeholder="Короткое описание для каталога"
-                  />
-                </label>
-
-                <label className="field field-wide">
-                  <span>Полное описание</span>
-                  <textarea
-                    rows="7"
-                    value={form.description}
-                    onChange={(event) => updateField("description", event.target.value)}
-                    placeholder="Опишите объем работ, условия, критерии выбора и сроки"
-                  />
-                </label>
-
-                <label className="field field-wide">
-                  <span>Теги</span>
-                  <input
-                    value={form.tags}
-                    onChange={(event) => updateField("tags", event.target.value)}
-                    placeholder="B2B, регулярный контракт, поставка"
-                  />
-                </label>
-              </div>
-
-              <button type="submit" className="button button-primary">
-                Опубликовать
-              </button>
-
-              {submitted ? (
-                <div className="success-banner">
-                  Объявление сохранено в демо-режиме. Следующий шаг: подключить API и базу данных.
+            {openCreate ? (
+              <form className="card listing-form" onSubmit={handleSubmit}>
+                <div className="form-grid">
+                  {user.role === "admin" ? <label className="field field-type"><span>Компания</span><select value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}><option value="">Выберите компанию</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label> : null}
+                  <label className="field"><span>Категория</span><input value={form.category} onChange={(event) => updateField("category", event.target.value)} /></label>
+                  <label className="field field-wide"><span>Название</span><input value={form.title} onChange={(event) => updateField("title", event.target.value)} /></label>
+                  <label className="field city-field"><span>Город</span><input value={form.cityMajor} onChange={(event) => updateField("cityMajor", event.target.value)} placeholder="Начните вводить город" />{citySuggestions.length ? <div className="field-suggestions">{citySuggestions.map((city) => <button key={city} type="button" className="search-suggestion" onClick={() => updateField("cityMajor", city)}>{city}</button>)}</div> : null}</label>
+                  <label className="field"><span>Район / пригород</span><input value={form.locationDetail} onChange={(event) => updateField("locationDetail", event.target.value)} placeholder="Рыбино или р-н Центральный" /></label>
+                  <label className="field"><span>Бюджет от</span><input type="number" value={form.budgetFrom} onChange={(event) => updateField("budgetFrom", event.target.value)} /></label>
+                  <label className="field"><span>Бюджет до</span><input type="number" value={form.budgetTo} onChange={(event) => updateField("budgetTo", event.target.value)} /></label>
+                  <label className="field field-wide"><span>Краткое описание</span><input value={form.summary} onChange={(event) => updateField("summary", event.target.value)} /></label>
+                  <label className="field field-wide"><span>Полное описание</span><textarea rows="6" value={form.description} onChange={(event) => updateField("description", event.target.value)} /></label>
+                  <label className="field field-wide"><span>Условия сотрудничества</span><textarea rows="4" value={form.terms} onChange={(event) => updateField("terms", event.target.value)} /></label>
+                  <label className="field field-wide"><span>Теги</span><input value={form.tags} onChange={(event) => updateField("tags", event.target.value)} placeholder="B2B, поставка, опт" /></label>
                 </div>
-              ) : null}
-            </form>
+                {error ? <div className="error-banner">{error}</div> : null}
+                {status ? <div className="success-banner">{status}</div> : null}
+                <div className="card-actions">
+                  <button type="submit" className="button button-primary">{editingId ? "Сохранить" : "Опубликовать"}</button>
+                  {editingId ? <button type="button" className="button button-secondary" onClick={resetForm}>Отменить</button> : null}
+                </div>
+              </form>
+            ) : null}
+
+            <div className="card manage-card">
+              <div className="manage-header">
+                <h2>{user.role === "admin" ? "Все объявления" : "Мои объявления"}</h2>
+                {user.role === "admin" ? <div className="admin-search-wrap"><input className="admin-search-input" value={adminSearch} onFocus={() => setAdminSearchFocused(true)} onBlur={() => setAdminSearchFocused(false)} onChange={(event) => setAdminSearch(event.target.value)} placeholder="Поиск по компании или названию" />{adminSearchFocused && adminSuggestions.length ? <div className="field-suggestions compact-suggestions">{adminSuggestions.map((item) => <button key={item} type="button" className="search-suggestion" onMouseDown={(event) => event.preventDefault()} onClick={() => setAdminSearch(item)}>{item}</button>)}</div> : null}</div> : null}
+              </div>
+              <div className="manage-list">
+                {editableOrders.map((item) => <article key={item.id} className="manage-item"><div><strong>{item.title}</strong><p>{item.company} · {item.city} · {item.budget}</p></div><div className="manage-actions"><button type="button" className="button button-secondary" onClick={() => startEdit(item)}>Изменить</button><button type="button" className="button button-ghost" onClick={() => removeOrder(item.id)}>Удалить</button></div></article>)}
+              </div>
+            </div>
           </div>
 
-          <aside className="form-side">
-            <div className="card tips-card">
-              <h3>Что важно для хорошей карточки</h3>
-              <ul>
-                <li>Конкретный заголовок без общих фраз</li>
-                <li>Ясный бюджет или пометка «по договоренности»</li>
-                <li>Город и формат сотрудничества</li>
-                <li>Точные условия и ожидаемый результат</li>
-              </ul>
+          <aside className="dashboard-side">
+            <div className="card chat-card">
+              <div className="card-actions">
+                {!showChatList ? <button type="button" className="button button-secondary" onClick={() => setShowChatList(true)}>← К чатам</button> : <h2>Чаты</h2>}
+              </div>
+              {showChatList ? (
+                <>
+                  <div className="chat-mode-switch">
+                    <button type="button" className={chatMode === "outgoing" ? "tab-button active" : "tab-button"} onClick={() => setChatMode("outgoing")}>Мои запросы</button>
+                    <button type="button" className={chatMode === "incoming" ? "tab-button active" : "tab-button"} onClick={() => setChatMode("incoming")}>Мне пишут</button>
+                  </div>
+                  <div className="chat-list">{filteredChats.map((chat) => <button key={chat.id} type="button" className="chat-link" onClick={() => openChat(chat.id)}>{chat.otherCompanyName || chat.subject}</button>)}</div>
+                </>
+              ) : activeChat ? (
+                <div className="chat-thread">
+                  <h3>{activeChat.otherCompanyName || activeChat.subject}</h3>
+                  <div className="chat-messages">{activeChat.messages.map((message) => <div key={message.id} className={message.senderCompanyId === user.companyId ? "chat-message own" : "chat-message"}>{message.text}</div>)}</div>
+                  <div className="chat-compose"><textarea rows="3" value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Напишите сообщение" /><button type="button" className="button button-primary button-block" onClick={sendMessage}>Отправить</button></div>
+                </div>
+              ) : null}
             </div>
           </aside>
         </div>
@@ -146,3 +267,11 @@ function CreatePage() {
 }
 
 export default CreatePage;
+
+
+
+
+
+
+
+

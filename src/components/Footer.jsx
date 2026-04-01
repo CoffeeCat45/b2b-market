@@ -6,7 +6,7 @@ function Footer() {
       <div className="container footer-row">
         <div>
           <strong>B2B Connect</strong>
-          <p>Демо-платформа для поиска поставщиков, подрядчиков и бизнес-заказов.</p>
+          <p>Платформа для поиска поставщиков, подрядчиков и бизнес-заказов.</p>
         </div>
         <div className="footer-links">
           <Link to="/orders">Каталог заказов</Link>
@@ -19,3 +19,4 @@ function Footer() {
 }
 
 export default Footer;
+

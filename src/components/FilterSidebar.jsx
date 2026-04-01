@@ -15,12 +15,15 @@
   onMaxChange,
   minPlaceholder,
   maxPlaceholder,
+  dateFilterValue,
+  onDateFilterChange,
+  dateFilterOptions = [],
+  dateFilterLabel = "Период",
   onReset,
 }) {
   return (
     <aside className="filters card">
       <h3>{title}</h3>
-      <p className="filter-hint">Фильтры применяются сразу после изменения.</p>
 
       <label className="field">
         <span>Поиск</span>
@@ -38,6 +41,19 @@
           ))}
         </select>
       </label>
+
+      {dateFilterOptions.length ? (
+        <label className="field">
+          <span>{dateFilterLabel}</span>
+          <select value={dateFilterValue} onChange={(event) => onDateFilterChange(event.target.value)}>
+            {dateFilterOptions.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       <div className="field">
         <span>Города</span>

@@ -1,10 +1,8 @@
-﻿import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 function ListingCard({ item, featured = false }) {
-  const navigate = useNavigate();
-
   const openCard = () => {
-    navigate(`/listing/${item.id}`);
+    window.open(`#/listing/${item.id}`, "_blank", "noopener,noreferrer");
   };
 
   const handleKeyDown = (event) => {
@@ -43,6 +41,8 @@ function ListingCard({ item, featured = false }) {
         <strong className="price">{item.budget}</strong>
         <Link
           to={`/listing/${item.id}`}
+          target="_blank"
+          rel="noreferrer"
           className="button button-secondary"
           onClick={(event) => event.stopPropagation()}
         >

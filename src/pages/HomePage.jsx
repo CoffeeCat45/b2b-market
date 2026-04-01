@@ -4,16 +4,17 @@ import Layout from "../components/Layout";
 import SearchBar from "../components/SearchBar";
 import ListingCard from "../components/ListingCard";
 import CompanyCard from "../components/CompanyCard";
-import { categories, orders } from "../data/orders";
-import { suppliers } from "../data/suppliers";
+import { useMarketplaceData } from "../hooks/useMarketplaceData";
 
 function HomePage() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [type, setType] = useState("orders");
+  const { orders, suppliers } = useMarketplaceData();
 
-  const featuredOrders = useMemo(() => orders.slice(0, 6), []);
-  const featuredSuppliers = useMemo(() => suppliers.slice(0, 3), []);
+  const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
+  const featuredOrders = useMemo(() => orders.slice(0, 6), [orders]);
+  const featuredSuppliers = useMemo(() => suppliers.slice(0, 3), [suppliers]);
 
   const handleSearch = (event) => {
     event.preventDefault();
@@ -64,13 +65,13 @@ function HomePage() {
           <div className="hero-panel">
             <div className="hero-panel-card">
               <p>Сегодня в фокусе</p>
-              <strong>Поставка упаковки для сети кофеен</strong>
-              <span>North Beans · Екатеринбург</span>
+              <strong>{featuredOrders[0]?.title || "Актуальные заказы"}</strong>
+              <span>{featuredOrders[0] ? `${featuredOrders[0].company} · ${featuredOrders[0].city}` : "B2B Connect"}</span>
             </div>
             <div className="hero-panel-card alternate">
               <p>Новый поставщик</p>
-              <strong>BuildAxis</strong>
-              <span>Коммерческая отделка и запуск объектов под ключ</span>
+              <strong>{featuredSuppliers[0]?.name || "Проверенные поставщики"}</strong>
+              <span>{featuredSuppliers[0]?.summary || "Компании для B2B-сотрудничества и переговоров."}</span>
             </div>
           </div>
         </div>
@@ -114,31 +115,6 @@ function HomePage() {
             {featuredSuppliers.map((item) => (
               <CompanyCard key={item.id} supplier={item} />
             ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="section-block section-accent">
-        <div className="container">
-          <div className="section-heading">
-            <h2>Как это работает</h2>
-          </div>
-          <div className="steps-grid">
-            <article className="step-card">
-              <span>01</span>
-              <h3>Разместите запрос</h3>
-              <p>Компания публикует заказ или предложение и указывает бюджет, город и условия.</p>
-            </article>
-            <article className="step-card">
-              <span>02</span>
-              <h3>Отфильтруйте рынок</h3>
-              <p>Пользователь просматривает каталог и выбирает подходящие карточки по параметрам.</p>
-            </article>
-            <article className="step-card">
-              <span>03</span>
-              <h3>Свяжитесь напрямую</h3>
-              <p>После выбора компании можно перейти в профиль и быстро начать обсуждение сделки.</p>
-            </article>
           </div>
         </div>
       </section>
