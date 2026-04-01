@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const rawConnectionString = process.env.DATABASE_URL?.trim();
+const poolMaxFromEnv = Number(process.env.PGPOOLMAX || "");
 
 function shouldUseSsl(url) {
   if (!url) return false;
@@ -21,12 +22,29 @@ function normalizeConnectionString(url) {
   return url.replace(/[?&]sslmode=require/gi, "");
 }
 
+function shouldUseManagedPoolDefaults(url) {
+  if (!url) return false;
+  return /(pooler|pgbouncer|6543)/i.test(url);
+}
+
+function resolvePoolMax(url) {
+  if (Number.isFinite(poolMaxFromEnv) && poolMaxFromEnv > 0) {
+    return poolMaxFromEnv;
+  }
+
+  // Managed poolers often expose very low session-mode limits.
+  return shouldUseManagedPoolDefaults(url) ? 1 : 10;
+}
+
 const connectionString = normalizeConnectionString(rawConnectionString);
+const max = resolvePoolMax(rawConnectionString);
 
 const poolConfig = connectionString
   ? {
       connectionString,
       ssl: shouldUseSsl(rawConnectionString) ? { rejectUnauthorized: false } : false,
+      max,
+      idleTimeoutMillis: 10000,
     }
   : {
       host: process.env.PGHOST || "localhost",
@@ -34,6 +52,8 @@ const poolConfig = connectionString
       user: process.env.PGUSER || "postgres",
       password: process.env.PGPASSWORD || "",
       database: process.env.PGDATABASE || "b2b_market",
+      max,
+      idleTimeoutMillis: 10000,
     };
 
 export const pool = new Pool(poolConfig);

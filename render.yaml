@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: b2b-market-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: PGPOOLMAX
+        value: 1
+      - key: DATABASE_URL
+        sync: false
