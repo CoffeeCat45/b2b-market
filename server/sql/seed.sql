@@ -1,4 +1,4 @@
-TRUNCATE chat_messages, chats, contract_requests, sessions, suppliers, orders, users, companies RESTART IDENTITY CASCADE;
+﻿TRUNCATE chat_messages, chats, contract_requests, sessions, suppliers, orders, users, companies RESTART IDENTITY CASCADE;
 
 INSERT INTO companies (id, name, city, industry, rating, description, about, specializations, reviews)
 VALUES
@@ -9,11 +9,11 @@ VALUES
 
 INSERT INTO users (id, company_id, email, password, role, display_name)
 VALUES
-  ('usr-admin', NULL, 'admin@b2b.local', 'admin123', 'admin', 'Администратор платформы'),
-  ('usr-cmp-1', 'cmp-1', 'northbeans@b2b.local', 'demo123', 'company', 'North Beans'),
-  ('usr-cmp-2', 'cmp-2', 'technoplast@b2b.local', 'demo123', 'company', 'ТехноПласт'),
-  ('usr-cmp-3', 'cmp-3', 'uralsnab@b2b.local', 'demo123', 'company', 'УралСнаб'),
-  ('usr-cmp-4', 'cmp-4', 'pekaren@b2b.local', 'demo123', 'company', 'Город Пекарен');
+  ('usr-admin', NULL, 'admin@b2b.local', '$2b$10$ZTrsi7XxUBzQs1c1UQZC3elaGknQXhMJvu1ONxMd5ET0hJHxRdMO.', 'admin', 'Администратор платформы'),
+  ('usr-cmp-1', 'cmp-1', 'northbeans@b2b.local', '$2b$10$QyIBEj6p0EZBfJRTKJH8EOdFob639Phw6UpysAJdLnRZIUuvNzv.y', 'company', 'North Beans'),
+  ('usr-cmp-2', 'cmp-2', 'technoplast@b2b.local', '$2b$10$QyIBEj6p0EZBfJRTKJH8EOdFob639Phw6UpysAJdLnRZIUuvNzv.y', 'company', 'ТехноПласт'),
+  ('usr-cmp-3', 'cmp-3', 'uralsnab@b2b.local', '$2b$10$QyIBEj6p0EZBfJRTKJH8EOdFob639Phw6UpysAJdLnRZIUuvNzv.y', 'company', 'УралСнаб'),
+  ('usr-cmp-4', 'cmp-4', 'pekaren@b2b.local', '$2b$10$QyIBEj6p0EZBfJRTKJH8EOdFob639Phw6UpysAJdLnRZIUuvNzv.y', 'company', 'Город Пекарен');
 
 INSERT INTO orders (id, company_id, title, category, city_major, location_detail, city, budget_from, budget_to, budget_label, summary, description, terms, tags, published_at, sort_order)
 VALUES

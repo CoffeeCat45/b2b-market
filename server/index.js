@@ -1,7 +1,7 @@
-﻿import "dotenv/config";
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import express from "express";
 import cors from "cors";
+import bcrypt from "bcryptjs";
 import { pool, testConnection } from "./db.js";
 
 const app = express();
@@ -73,6 +73,20 @@ function mapOrderPayload(body) {
   };
 }
 
+function isBcryptHash(value) {
+  return typeof value === "string" && /^\$2[aby]\$\d{2}\$/.test(value);
+}
+
+async function verifyPassword(storedPassword, providedPassword) {
+  if (!storedPassword) return false;
+
+  if (isBcryptHash(storedPassword)) {
+    return bcrypt.compare(providedPassword, storedPassword);
+  }
+
+  return storedPassword === providedPassword;
+}
+
 app.get("/api/health", async (_req, res) => {
   try {
     const dbOk = await testConnection();
@@ -95,7 +109,17 @@ app.post("/api/auth/login", async (req, res) => {
       [String(email || "").trim().toLowerCase()],
     );
     const user = result.rows[0];
-    if (!user || user.password !== password) return res.status(401).json({ message: "Неверный email или пароль." });
+    const normalizedPassword = String(password || "");
+    const passwordOk = user ? await verifyPassword(user.password, normalizedPassword) : false;
+    if (!user || !passwordOk) return res.status(401).json({ message: "Неверный email или пароль." });
+
+    // Migrate legacy plain-text passwords after the first successful login.
+    if (!isBcryptHash(user.password)) {
+      const nextHash = await bcrypt.hash(normalizedPassword, 10);
+      await pool.query("UPDATE users SET password = $2 WHERE id = $1", [user.id, nextHash]);
+      user.password = nextHash;
+    }
+
     const token = crypto.randomUUID();
     await pool.query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)", [token, user.id]);
     delete user.password;
@@ -177,9 +201,9 @@ app.delete("/api/orders/:id", authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/chats/open', authMiddleware, async (req, res) => {
+app.post("/api/chats/open", authMiddleware, async (req, res) => {
   try {
-    if (!req.user.companyId) return res.status(400).json({ message: 'Только компания может писать сообщения.' });
+    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может писать сообщения." });
     const otherCompanyId = req.body.companyId;
     const existing = await pool.query(
       `SELECT id FROM chats WHERE (company_a_id = $1 AND company_b_id = $2) OR (company_a_id = $2 AND company_b_id = $1) LIMIT 1`,
@@ -187,18 +211,18 @@ app.post('/api/chats/open', authMiddleware, async (req, res) => {
     );
     const chatId = existing.rows[0]?.id || `chat-${Date.now()}`;
     if (!existing.rows[0]) {
-      await pool.query(`INSERT INTO chats (id, company_a_id, company_b_id, subject) VALUES ($1,$2,$3,$4)`, [chatId, req.user.companyId, otherCompanyId, req.body.subject || 'Новый диалог']);
+      await pool.query(`INSERT INTO chats (id, company_a_id, company_b_id, subject) VALUES ($1,$2,$3,$4)`, [chatId, req.user.companyId, otherCompanyId, req.body.subject || "Новый диалог"]);
     }
     if (req.body.message) {
       await pool.query(`INSERT INTO chat_messages (id, chat_id, sender_company_id, text) VALUES ($1,$2,$3,$4)`, [`msg-${crypto.randomUUID()}`, chatId, req.user.companyId, req.body.message]);
     }
     res.json({ ok: true, chatId });
   } catch (error) {
-    res.status(500).json({ message: 'Не удалось открыть чат.', error: error.message });
+    res.status(500).json({ message: "Не удалось открыть чат.", error: error.message });
   }
 });
 
-app.get('/api/chats', authMiddleware, async (req, res) => {
+app.get("/api/chats", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT ch.id, ch.subject, to_char(ch.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt",
@@ -221,20 +245,20 @@ app.get('/api/chats', authMiddleware, async (req, res) => {
        JOIN companies cb ON cb.id = ch.company_b_id
        WHERE $1 = 'admin' OR ch.company_a_id = $2 OR ch.company_b_id = $2
        ORDER BY ch.created_at DESC`,
-      [req.user.role, req.user.companyId || ''],
+      [req.user.role, req.user.companyId || ""],
     );
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ message: 'Не удалось получить чаты.', error: error.message });
+    res.status(500).json({ message: "Не удалось получить чаты.", error: error.message });
   }
 });
 
-app.post('/api/chats/:id/messages', authMiddleware, async (req, res) => {
+app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
   try {
     await pool.query(`INSERT INTO chat_messages (id, chat_id, sender_company_id, text) VALUES ($1,$2,$3,$4)`, [`msg-${crypto.randomUUID()}`, req.params.id, req.user.companyId, req.body.text]);
     res.status(201).json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: 'Не удалось отправить сообщение.', error: error.message });
+    res.status(500).json({ message: "Не удалось отправить сообщение.", error: error.message });
   }
 });
 
@@ -257,3 +281,6 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
+
+
