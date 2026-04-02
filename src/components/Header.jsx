@@ -1,4 +1,4 @@
-import { Link, NavLink } from "react-router-dom";
+﻿import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 function Header() {
@@ -18,6 +18,7 @@ function Header() {
         <nav className="main-nav">
           <NavLink to="/orders">Заказы</NavLink>
           <NavLink to="/suppliers">Поставщики</NavLink>
+          {user ? <NavLink to="/chats">Чаты</NavLink> : null}
         </nav>
 
         <div className="header-actions">

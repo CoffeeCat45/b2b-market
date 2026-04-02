@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+﻿import { useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 
 function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,7 +19,8 @@ function LoginPage() {
 
     try {
       await login(email, password);
-      navigate("/");
+      const nextPath = searchParams.get("next");
+      navigate(nextPath || "/");
     } catch (loginError) {
       setError(loginError.message);
     } finally {
@@ -41,7 +43,9 @@ function LoginPage() {
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Введите пароль" />
             </label>
             {error ? <div className="error-banner">{error}</div> : null}
-            <button type="submit" className="button button-primary button-block" disabled={loading}>{loading ? "Вход..." : "Войти"}</button>
+            <button type="submit" className="button button-primary button-block" disabled={loading}>
+              {loading ? "Вход..." : "Войти"}
+            </button>
           </form>
         </div>
       </section>

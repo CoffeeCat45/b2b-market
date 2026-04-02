@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS companies (
+﻿CREATE TABLE IF NOT EXISTS companies (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   city TEXT NOT NULL,
@@ -53,7 +53,18 @@ CREATE TABLE IF NOT EXISTS suppliers (
   rating NUMERIC(2, 1) NOT NULL,
   summary TEXT NOT NULL,
   description TEXT NOT NULL,
-  skills JSONB NOT NULL DEFAULT '[]'::jsonb
+  skills JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE suppliers
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE TABLE IF NOT EXISTS order_views (
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (order_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS contract_requests (
@@ -71,14 +82,34 @@ CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY,
   company_a_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   company_b_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
   subject TEXT NOT NULL,
+  is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  offered_details TEXT NOT NULL DEFAULT '',
+  agreement_details TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS order_id TEXT REFERENCES orders(id) ON DELETE SET NULL;
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS offered_details TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS agreement_details TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY,
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   sender_company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   text TEXT NOT NULL,
+  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE chat_messages
+  ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;

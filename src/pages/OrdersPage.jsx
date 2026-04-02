@@ -4,7 +4,14 @@ import Layout from "../components/Layout";
 import FilterSidebar from "../components/FilterSidebar";
 import ListingCard from "../components/ListingCard";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
-import { DATE_FILTER_OPTIONS, matchesDateFilter } from "../lib/date";
+import { DATE_FILTER_OPTIONS, matchesDateFilter, parseRussianDate } from "../lib/date";
+
+const SORT_OPTIONS = [
+  { value: "date_desc", label: "Сначала свежие" },
+  { value: "popular_desc", label: "Сначала популярные" },
+  { value: "max_budget_asc", label: "По цене: максимум по возрастанию" },
+  { value: "min_budget_desc", label: "По цене: минимум по убыванию" },
+];
 
 function OrdersPage() {
   const [searchParams] = useSearchParams();
@@ -15,6 +22,7 @@ function OrdersPage() {
   const [selectedCities, setSelectedCities] = useState([]);
   const [minBudget, setMinBudget] = useState("");
   const [maxBudget, setMaxBudget] = useState("");
+  const [sortBy, setSortBy] = useState("date_desc");
   const { orders } = useMarketplaceData();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
@@ -24,7 +32,7 @@ function OrdersPage() {
     const normalizedMin = minBudget ? Number(minBudget) : null;
     const normalizedMax = maxBudget ? Number(maxBudget) : null;
 
-    return orders.filter((item) => {
+    const nextOrders = orders.filter((item) => {
       const matchesQuery = !query || `${item.title} ${item.company} ${item.summary}`.toLowerCase().includes(query.toLowerCase());
       const matchesCategory = !category || item.category === category;
       const matchesDate = matchesDateFilter(item.date, dateFilter);
@@ -33,7 +41,26 @@ function OrdersPage() {
       const matchesMaxBudget = normalizedMax === null || item.budgetFrom <= normalizedMax;
       return matchesQuery && matchesCategory && matchesDate && matchesCity && matchesMinBudget && matchesMaxBudget;
     });
-  }, [orders, query, category, dateFilter, selectedCities, minBudget, maxBudget]);
+
+    return nextOrders.sort((a, b) => {
+      if (sortBy === "popular_desc") {
+        const viewsDiff = (b.viewsCount || 0) - (a.viewsCount || 0);
+        if (viewsDiff !== 0) return viewsDiff;
+      }
+
+      if (sortBy === "max_budget_asc") {
+        return a.budgetTo - b.budgetTo;
+      }
+
+      if (sortBy === "min_budget_desc") {
+        return b.budgetFrom - a.budgetFrom;
+      }
+
+      const aDate = parseRussianDate(a.date)?.getTime() || 0;
+      const bDate = parseRussianDate(b.date)?.getTime() || 0;
+      return bDate - aDate;
+    });
+  }, [orders, query, category, dateFilter, selectedCities, minBudget, maxBudget, sortBy]);
 
   const toggleCity = (city) => {
     setSelectedCities((current) => (current.includes(city) ? current.filter((item) => item !== city) : [...current, city]));
@@ -46,6 +73,7 @@ function OrdersPage() {
     setSelectedCities([]);
     setMinBudget("");
     setMaxBudget("");
+    setSortBy("date_desc");
   };
 
   return (
@@ -82,8 +110,17 @@ function OrdersPage() {
             />
             <div className="catalog-content">
               <div className="catalog-toolbar card">
-                <span>Сначала свежие</span>
-                
+                <span>Сортировка</span>
+                <label className="catalog-sort-control">
+                  <span className="visually-hidden">Сортировка заказов</span>
+                  <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="catalog-list">
                 {filteredOrders.map((item) => <ListingCard key={item.id} item={item} />)}
@@ -97,5 +134,3 @@ function OrdersPage() {
 }
 
 export default OrdersPage;
-
-

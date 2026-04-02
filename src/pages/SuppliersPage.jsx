@@ -6,6 +6,12 @@ import CompanyCard from "../components/CompanyCard";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseRussianDate } from "../lib/date";
 
+const SORT_OPTIONS = [
+  { value: "date_desc", label: "Сначала свежие" },
+  { value: "rating_desc", label: "По рейтингу: высокий сначала" },
+  { value: "rating_asc", label: "По рейтингу: низкий сначала" },
+];
+
 function SuppliersPage() {
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") ?? "";
@@ -15,41 +21,40 @@ function SuppliersPage() {
   const [selectedCities, setSelectedCities] = useState([]);
   const [minRating, setMinRating] = useState("");
   const [maxRating, setMaxRating] = useState("");
-  const { suppliers, orders } = useMarketplaceData();
+  const [sortBy, setSortBy] = useState("date_desc");
+  const { suppliers } = useMarketplaceData();
 
   const cityOptions = useMemo(() => [...new Set(suppliers.map((item) => item.city))].sort((a, b) => a.localeCompare(b, "ru")), [suppliers]);
   const supplierCategories = useMemo(() => [...new Set(suppliers.map((item) => item.industry))].sort((a, b) => a.localeCompare(b, "ru")), [suppliers]);
-  const supplierActivityDates = useMemo(() => {
-    const latestByCompany = new Map();
-
-    orders.forEach((item) => {
-      const parsedDate = parseRussianDate(item.date);
-      if (!parsedDate || Number.isNaN(parsedDate.getTime())) return;
-
-      const current = latestByCompany.get(item.companyId);
-      if (!current || parsedDate > current) {
-        latestByCompany.set(item.companyId, parsedDate);
-      }
-    });
-
-    return latestByCompany;
-  }, [orders]);
 
   const filteredSuppliers = useMemo(() => {
     const normalizedMin = minRating ? Number(minRating) : null;
     const normalizedMax = maxRating ? Number(maxRating) : null;
 
-    return suppliers.filter((item) => {
+    const nextSuppliers = suppliers.filter((item) => {
       const matchesQuery = !query || `${item.name} ${item.summary} ${item.description}`.toLowerCase().includes(query.toLowerCase());
       const matchesCategory = !category || item.industry === category;
-      const lastActivity = supplierActivityDates.get(item.companyId);
-      const matchesDate = dateFilter === "all" || (lastActivity && matchesDateFilter(lastActivity.toLocaleDateString("ru-RU"), dateFilter));
+      const matchesDate = matchesDateFilter(item.createdAt, dateFilter);
       const matchesCity = !selectedCities.length || selectedCities.includes(item.city);
       const matchesMinRating = normalizedMin === null || item.rating >= normalizedMin;
       const matchesMaxRating = normalizedMax === null || item.rating <= normalizedMax;
       return matchesQuery && matchesCategory && matchesDate && matchesCity && matchesMinRating && matchesMaxRating;
     });
-  }, [suppliers, query, category, dateFilter, selectedCities, minRating, maxRating, supplierActivityDates]);
+
+    return nextSuppliers.sort((a, b) => {
+      if (sortBy === "rating_desc") {
+        return b.rating - a.rating;
+      }
+
+      if (sortBy === "rating_asc") {
+        return a.rating - b.rating;
+      }
+
+      const dateA = parseRussianDate(a.createdAt)?.getTime() ?? 0;
+      const dateB = parseRussianDate(b.createdAt)?.getTime() ?? 0;
+      return dateB - dateA;
+    });
+  }, [suppliers, query, category, dateFilter, selectedCities, minRating, maxRating, sortBy]);
 
   const toggleCity = (city) => {
     setSelectedCities((current) => (current.includes(city) ? current.filter((item) => item !== city) : [...current, city]));
@@ -62,6 +67,7 @@ function SuppliersPage() {
     setSelectedCities([]);
     setMinRating("");
     setMaxRating("");
+    setSortBy("date_desc");
   };
 
   return (
@@ -83,7 +89,7 @@ function SuppliersPage() {
               dateFilterValue={dateFilter}
               onDateFilterChange={setDateFilter}
               dateFilterOptions={DATE_FILTER_OPTIONS}
-              dateFilterLabel="Последняя активность"
+              dateFilterLabel="Дата регистрации"
               cityOptions={cityOptions}
               selectedCities={selectedCities}
               onToggleCity={toggleCity}
@@ -98,8 +104,17 @@ function SuppliersPage() {
             />
             <div className="catalog-content">
               <div className="catalog-toolbar card">
-                <span>Рейтинг и экспертиза</span>
-                
+                <span>Сортировка</span>
+                <label className="catalog-sort-control">
+                  <span className="visually-hidden">Сортировка поставщиков</span>
+                  <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="catalog-list company-list">
                 {filteredSuppliers.map((item) => <CompanyCard key={item.id} supplier={item} />)}
@@ -113,5 +128,3 @@ function SuppliersPage() {
 }
 
 export default SuppliersPage;
-
-
