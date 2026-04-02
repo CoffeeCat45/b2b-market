@@ -146,6 +146,86 @@ app.get("/api/locations", (_req, res) => {
   res.json({ cities: CITY_OPTIONS });
 });
 
+app.post("/api/auth/register", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const companyName = String(req.body.companyName || "").trim();
+    const displayName = String(req.body.displayName || "").trim();
+    const city = String(req.body.city || "").trim();
+    const industry = String(req.body.industry || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
+    if (!companyName || !displayName || !city || !industry || !email || !password) {
+      return res.status(400).json({ message: "Заполните все поля регистрации." });
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ message: "Укажите корректный email." });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "Пароль должен содержать минимум 6 символов." });
+    }
+
+    await client.query("BEGIN");
+
+    const existingUser = await client.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (existingUser.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "Пользователь с таким email уже существует." });
+    }
+
+    const companyId = `cmp-${crypto.randomUUID()}`;
+    const userId = `usr-${crypto.randomUUID()}`;
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await client.query(
+      `INSERT INTO companies (id, name, city, industry, rating, description, about, specializations, reviews)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
+      [
+        companyId,
+        companyName,
+        city,
+        industry,
+        0,
+        `${companyName} зарегистрирована на платформе B2B Connect.`,
+        `${companyName} работает в категории "${industry}" и может публиковать объявления, искать поставщиков и вести переговоры в чатах.`,
+        JSON.stringify([industry]),
+        JSON.stringify([]),
+      ],
+    );
+
+    await client.query(
+      `INSERT INTO users (id, company_id, email, password, role, display_name)
+       VALUES ($1, $2, $3, $4, 'company', $5)`,
+      [userId, companyId, email, passwordHash, displayName],
+    );
+
+    const token = crypto.randomUUID();
+    await client.query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)", [token, userId]);
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      token,
+      user: {
+        id: userId,
+        companyId,
+        email,
+        role: "company",
+        displayName,
+        company: companyName,
+      },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ message: "Не удалось зарегистрировать аккаунт.", error: error.message });
+  } finally {
+    client.release();
+  }
+});
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -491,3 +571,4 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+

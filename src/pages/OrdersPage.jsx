@@ -19,27 +19,70 @@ function OrdersPage() {
   const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState("");
   const [dateFilter, setDateFilter] = useState("all");
-  const [selectedCities, setSelectedCities] = useState([]);
+  const [majorCityInput, setMajorCityInput] = useState("");
+  const [appliedMajorCity, setAppliedMajorCity] = useState("");
+  const [locationInput, setLocationInput] = useState("");
+  const [appliedLocation, setAppliedLocation] = useState("");
   const [minBudget, setMinBudget] = useState("");
   const [maxBudget, setMaxBudget] = useState("");
   const [sortBy, setSortBy] = useState("date_desc");
   const { orders } = useMarketplaceData();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
-  const cityOptions = useMemo(() => [...new Set(orders.map((item) => item.city))].sort((a, b) => a.localeCompare(b, "ru")), [orders]);
+  const majorCityOptions = useMemo(
+    () => [...new Set(orders.map((item) => item.cityMajor).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
+    [orders],
+  );
+
+  const majorCitySuggestions = useMemo(() => {
+    const normalized = majorCityInput.trim().toLowerCase();
+    if (!normalized) return majorCityOptions.slice(0, 8);
+
+    return majorCityOptions
+      .filter((city) => city.toLowerCase().includes(normalized))
+      .slice(0, 8);
+  }, [majorCityOptions, majorCityInput]);
+
+  const normalizedAppliedMajorCity = useMemo(
+    () => majorCityOptions.find((city) => city.toLowerCase() === appliedMajorCity.trim().toLowerCase()) || "",
+    [majorCityOptions, appliedMajorCity],
+  );
+
+  const locationOptions = useMemo(() => {
+    if (!normalizedAppliedMajorCity) return [];
+
+    return [...new Set(
+      orders
+        .filter((item) => item.cityMajor === normalizedAppliedMajorCity)
+        .map((item) => item.locationDetail)
+        .filter(Boolean),
+    )].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [orders, normalizedAppliedMajorCity]);
+
+  const locationSuggestions = useMemo(() => {
+    const normalized = locationInput.trim().toLowerCase();
+    if (!normalized) return locationOptions.slice(0, 8);
+
+    return locationOptions
+      .filter((location) => location.toLowerCase().includes(normalized))
+      .slice(0, 8);
+  }, [locationOptions, locationInput]);
 
   const filteredOrders = useMemo(() => {
     const normalizedMin = minBudget ? Number(minBudget) : null;
     const normalizedMax = maxBudget ? Number(maxBudget) : null;
+    const majorCityQuery = appliedMajorCity.trim().toLowerCase();
+    const locationQuery = appliedLocation.trim().toLowerCase();
 
     const nextOrders = orders.filter((item) => {
       const matchesQuery = !query || `${item.title} ${item.company} ${item.summary}`.toLowerCase().includes(query.toLowerCase());
       const matchesCategory = !category || item.category === category;
       const matchesDate = matchesDateFilter(item.date, dateFilter);
-      const matchesCity = !selectedCities.length || selectedCities.includes(item.city);
+      const matchesMajorCity = !majorCityQuery || (item.cityMajor || "").toLowerCase() === majorCityQuery;
+      const matchesLocation = !locationQuery || (item.locationDetail || "").toLowerCase() === locationQuery;
       const matchesMinBudget = normalizedMin === null || item.budgetTo >= normalizedMin;
       const matchesMaxBudget = normalizedMax === null || item.budgetFrom <= normalizedMax;
-      return matchesQuery && matchesCategory && matchesDate && matchesCity && matchesMinBudget && matchesMaxBudget;
+      return matchesQuery && matchesCategory && matchesDate && matchesMajorCity && matchesLocation && matchesMinBudget && matchesMaxBudget;
     });
 
     return nextOrders.sort((a, b) => {
@@ -60,17 +103,32 @@ function OrdersPage() {
       const bDate = parseRussianDate(b.date)?.getTime() || 0;
       return bDate - aDate;
     });
-  }, [orders, query, category, dateFilter, selectedCities, minBudget, maxBudget, sortBy]);
+  }, [orders, query, category, dateFilter, appliedMajorCity, appliedLocation, minBudget, maxBudget, sortBy]);
 
-  const toggleCity = (city) => {
-    setSelectedCities((current) => (current.includes(city) ? current.filter((item) => item !== city) : [...current, city]));
+  const applyMajorCity = (value) => {
+    const normalized = value.trim().toLowerCase();
+    const matched = majorCityOptions.find((city) => city.toLowerCase() === normalized) || "";
+    setAppliedMajorCity(matched);
+    setMajorCityInput(matched || value.trim());
+    setAppliedLocation("");
+    setLocationInput("");
+  };
+
+  const applyLocation = (value) => {
+    const normalized = value.trim().toLowerCase();
+    const matched = locationOptions.find((location) => location.toLowerCase() === normalized) || "";
+    setAppliedLocation(matched);
+    setLocationInput(matched || value.trim());
   };
 
   const resetFilters = () => {
     setQuery(initialQuery);
     setCategory("");
     setDateFilter("all");
-    setSelectedCities([]);
+    setMajorCityInput("");
+    setAppliedMajorCity("");
+    setLocationInput("");
+    setAppliedLocation("");
     setMinBudget("");
     setMaxBudget("");
     setSortBy("date_desc");
@@ -96,9 +154,32 @@ function OrdersPage() {
               onDateFilterChange={setDateFilter}
               dateFilterOptions={DATE_FILTER_OPTIONS}
               dateFilterLabel="Дата публикации"
-              cityOptions={cityOptions}
-              selectedCities={selectedCities}
-              onToggleCity={toggleCity}
+              majorCityOptions={majorCityOptions}
+              selectedMajorCity={majorCityInput}
+              onMajorCityChange={(value) => {
+                setMajorCityInput(value);
+                if (!value.trim()) {
+                  setAppliedMajorCity("");
+                  setLocationInput("");
+                  setAppliedLocation("");
+                }
+              }}
+              onMajorCityBlur={() => applyMajorCity(majorCityInput)}
+              majorCitySuggestions={majorCitySuggestions}
+              onMajorCitySuggestionPick={applyMajorCity}
+              locationOptions={locationOptions}
+              selectedLocation={locationInput}
+              onLocationChange={(value) => {
+                setLocationInput(value);
+                if (!value.trim()) {
+                  setAppliedLocation("");
+                }
+              }}
+              onLocationBlur={() => applyLocation(locationInput)}
+              locationSuggestions={locationSuggestions}
+              onLocationSuggestionPick={applyLocation}
+              majorCityLabel="Областной центр"
+              locationLabel="Пригород / район"
               rangeTitle="Бюджет, ₽"
               minValue={minBudget}
               maxValue={maxBudget}

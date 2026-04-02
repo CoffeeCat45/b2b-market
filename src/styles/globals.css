@@ -689,6 +689,16 @@ main {
   width: min(100% - 32px, 480px);
 }
 
+.auth-card-wide {
+  width: min(100% - 32px, 560px);
+}
+
+.auth-mode-switch {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 .site-footer {
   padding: 32px 0 44px;
 }
@@ -1006,6 +1016,20 @@ main {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.form-intro {
+  margin-bottom: 18px;
+}
+
+.form-intro h2,
+.form-intro p {
+  margin: 0;
+}
+
+.form-intro p {
+  margin-top: 6px;
+  color: var(--muted);
 }
 
 .chats-page-section {

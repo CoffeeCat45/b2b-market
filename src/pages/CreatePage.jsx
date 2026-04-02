@@ -122,6 +122,10 @@ function CreatePage() {
 
           {openCreate ? (
             <form className="card listing-form" onSubmit={handleSubmit}>
+              <div className="form-intro">
+                <h2>{editingId ? "Форма редактирования объявления" : "Форма создания объявления"}</h2>
+                <p>{editingId ? "Обновите данные текущего объявления и сохраните изменения." : "Заполните карточку, чтобы опубликовать новое объявление в каталоге."}</p>
+              </div>
               <div className="form-grid">
                 {user.role === "admin" ? <label className="field field-type"><span>Компания</span><select value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}><option value="">Выберите компанию</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label> : null}
                 <label className="field"><span>Категория</span><input value={form.category} onChange={(event) => updateField("category", event.target.value)} /></label>
@@ -160,3 +164,4 @@ function CreatePage() {
 }
 
 export default CreatePage;
+
