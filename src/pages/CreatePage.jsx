@@ -8,7 +8,7 @@ import { useMarketplaceData } from "../hooks/useMarketplaceData";
 const emptyForm = { title: "", category: "Оптовые поставки", cityMajor: "", locationDetail: "", budgetFrom: "", budgetTo: "", summary: "", description: "", terms: "", tags: "", companyId: "" };
 
 function CreatePage() {
-  const { user, loading } = useAuth();
+  const { user, loading, updateUser } = useAuth();
   const { orders, companies, reload } = useMarketplaceData();
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState(emptyForm);
@@ -18,6 +18,12 @@ function CreatePage() {
   const [openCreate, setOpenCreate] = useState(true);
   const [adminSearch, setAdminSearch] = useState("");
   const [adminSearchFocused, setAdminSearchFocused] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [profileStep, setProfileStep] = useState("verify");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [profileForm, setProfileForm] = useState({ displayName: "", companyName: "", city: "" });
+  const [profileError, setProfileError] = useState("");
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const chatCompany = searchParams.get("chatCompany");
   const orderId = searchParams.get("orderId");
@@ -26,9 +32,8 @@ function CreatePage() {
     return <Navigate to={next} replace />;
   }
 
-  const citySuggestions = useMemo(() => {
-    return [];
-  }, []);
+  const citySuggestions = useMemo(() => [], []);
+  const currentCompany = useMemo(() => companies.find((company) => company.id === user?.companyId) || null, [companies, user]);
 
   const editableOrders = useMemo(() => {
     if (!user) return [];
@@ -45,10 +50,75 @@ function CreatePage() {
   }, [adminSearch, orders, user]);
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const updateProfileField = (field, value) => setProfileForm((current) => ({ ...current, [field]: value }));
 
   const resetForm = () => {
     setEditingId(null);
     setForm({ ...emptyForm, companyId: user?.companyId || "" });
+  };
+
+  const openProfileModal = () => {
+    setProfileModalOpen(true);
+    setProfileStep("verify");
+    setProfilePassword("");
+    setProfileError("");
+    setProfileForm({
+      displayName: user?.displayName || "",
+      companyName: currentCompany?.name || user?.company || "",
+      city: currentCompany?.city || user?.companyCity || "",
+    });
+  };
+
+  const closeProfileModal = () => {
+    setProfileModalOpen(false);
+    setProfileStep("verify");
+    setProfilePassword("");
+    setProfileError("");
+    setProfileLoading(false);
+  };
+
+  const verifyProfilePassword = async (event) => {
+    event.preventDefault();
+    setProfileError("");
+    setProfileLoading(true);
+
+    try {
+      await apiFetch("/auth/verify-password", {
+        method: "POST",
+        body: JSON.stringify({ password: profilePassword }),
+      });
+      setProfileStep("edit");
+    } catch (verifyError) {
+      setProfileError(verifyError.message);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const saveProfile = async (event) => {
+    event.preventDefault();
+    setProfileError("");
+    setProfileLoading(true);
+
+    try {
+      const data = await apiFetch("/auth/profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          currentPassword: profilePassword,
+          displayName: profileForm.displayName,
+          companyName: profileForm.companyName,
+          city: profileForm.city,
+        }),
+      });
+      updateUser(data.user);
+      setStatus("Данные компании обновлены.");
+      closeProfileModal();
+      await reload();
+    } catch (saveError) {
+      setProfileError(saveError.message);
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -110,6 +180,11 @@ function CreatePage() {
             <div className="card-actions">
               <h1>{editingId ? "Редактирование объявления" : "Кабинет компании"}</h1>
               <div className="dashboard-top-actions">
+                {user.role === "company" ? (
+                  <button type="button" className="button button-secondary" onClick={openProfileModal}>
+                    Данные
+                  </button>
+                ) : null}
                 <Link to="/chats" className="button button-secondary">
                   Открыть чаты
                 </Link>
@@ -159,9 +234,56 @@ function CreatePage() {
           </div>
         </div>
       </section>
+
+      {profileModalOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={closeProfileModal}>
+          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h2 id="profile-modal-title">{profileStep === "verify" ? "Подтвердите пароль" : "Данные компании"}</h2>
+                <p>{profileStep === "verify" ? "Перед изменением данных подтвердите пароль от аккаунта." : "Измените контактное имя, компанию и город."}</p>
+              </div>
+              <button type="button" className="button button-secondary modal-close" onClick={closeProfileModal}>×</button>
+            </div>
+
+            {profileStep === "verify" ? (
+              <form onSubmit={verifyProfilePassword} className="modal-form-grid">
+                <label className="field">
+                  <span>Пароль</span>
+                  <input type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
+                </label>
+                {profileError ? <div className="error-banner">{profileError}</div> : null}
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>
+                  <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Проверка..." : "Продолжить"}</button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={saveProfile} className="modal-form-grid">
+                <label className="field">
+                  <span>Контактное имя</span>
+                  <input value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Название компании</span>
+                  <input value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Город</span>
+                  <input value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} />
+                </label>
+                {profileError ? <div className="error-banner">{profileError}</div> : null}
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>
+                  <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Сохранение..." : "Сохранить"}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : null}
     </Layout>
   );
 }
 
 export default CreatePage;
-

@@ -1366,6 +1366,11 @@ main {
   gap: 16px;
 }
 
+.modal-form-grid {
+  display: grid;
+  gap: 14px;
+}
+
 .modal-header,
 .modal-actions {
   display: flex;
@@ -1382,6 +1387,14 @@ main {
 .modal-header p {
   margin-top: 6px;
   color: var(--muted);
+}
+
+.modal-close {
+  min-width: 42px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font-size: 1.2rem;
 }
 
 .chat-panel-empty,

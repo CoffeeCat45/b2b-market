@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+﻿import { createContext, useContext, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 const AuthContext = createContext(null);
@@ -46,6 +46,10 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  const updateUser = (nextUser) => {
+    setUser((current) => (typeof nextUser === "function" ? nextUser(current) : nextUser));
+  };
+
   const logout = async () => {
     try {
       await apiFetch("/auth/logout", { method: "POST" });
@@ -57,7 +61,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, updateUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -16,7 +16,7 @@ const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "imag
 async function getUserByToken(token) {
   if (!token) return null;
   const result = await pool.query(
-    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company
+    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity"
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN companies c ON c.id = u.company_id
@@ -217,6 +217,7 @@ app.post("/api/auth/register", async (req, res) => {
         role: "company",
         displayName,
         company: companyName,
+        companyCity: city,
       },
     });
   } catch (error) {
@@ -230,7 +231,7 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await pool.query(
-      `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company
+      `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity"
        FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.email = $1`,
       [String(email || "").trim().toLowerCase()],
     );
@@ -251,6 +252,66 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({ token, user });
   } catch (error) {
     res.status(500).json({ message: "Не удалось выполнить вход.", error: error.message });
+  }
+});
+
+app.post("/api/auth/verify-password", authMiddleware, async (req, res) => {
+  try {
+    const password = String(req.body.password || "");
+    const result = await pool.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
+    const storedPassword = result.rows[0]?.password || "";
+    const ok = await verifyPassword(storedPassword, password);
+
+    if (!ok) return res.status(401).json({ message: "???????? ??????." });
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "?? ??????? ??????????? ??????.", error: error.message });
+  }
+});
+
+app.put("/api/auth/profile", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const currentPassword = String(req.body.currentPassword || "");
+    const displayName = String(req.body.displayName || "").trim();
+    const companyName = String(req.body.companyName || "").trim();
+    const city = String(req.body.city || "").trim();
+
+    if (!displayName) {
+      return res.status(400).json({ message: "??????? ?????????? ???." });
+    }
+
+    const userResult = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
+    const storedPassword = userResult.rows[0]?.password || "";
+    const passwordOk = await verifyPassword(storedPassword, currentPassword);
+
+    if (!passwordOk) {
+      return res.status(401).json({ message: "???????? ??????." });
+    }
+
+    await client.query("BEGIN");
+    await client.query("UPDATE users SET display_name = $2 WHERE id = $1", [req.user.id, displayName]);
+
+    if (req.user.companyId) {
+      if (!companyName || !city) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "??????? ???????? ???????? ? ?????." });
+      }
+
+      await client.query("UPDATE companies SET name = $2, city = $3 WHERE id = $1", [req.user.companyId, companyName, city]);
+    }
+
+    await client.query("COMMIT");
+
+    const refreshed = await getUserByToken((req.headers.authorization || "").startsWith("Bearer ") ? (req.headers.authorization || "").slice(7) : null);
+    res.json({ ok: true, user: refreshed });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ message: "?? ??????? ???????? ?????? ???????.", error: error.message });
+  } finally {
+    client.release();
   }
 });
 
