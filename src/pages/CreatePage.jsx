@@ -19,7 +19,7 @@ function CreatePage() {
   const [adminSearch, setAdminSearch] = useState("");
   const [adminSearchFocused, setAdminSearchFocused] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [profileStep, setProfileStep] = useState("verify");
+  const [profileStep, setProfileStep] = useState("view");
   const [profilePassword, setProfilePassword] = useState("");
   const [profileForm, setProfileForm] = useState({ displayName: "", companyName: "", city: "" });
   const [profileError, setProfileError] = useState("");
@@ -59,7 +59,7 @@ function CreatePage() {
 
   const openProfileModal = () => {
     setProfileModalOpen(true);
-    setProfileStep("verify");
+    setProfileStep("view");
     setProfilePassword("");
     setProfileError("");
     setProfileForm({
@@ -71,10 +71,16 @@ function CreatePage() {
 
   const closeProfileModal = () => {
     setProfileModalOpen(false);
-    setProfileStep("verify");
+    setProfileStep("view");
     setProfilePassword("");
     setProfileError("");
     setProfileLoading(false);
+  };
+
+  const startProfileEdit = () => {
+    setProfileStep("verify");
+    setProfilePassword("");
+    setProfileError("");
   };
 
   const verifyProfilePassword = async (event) => {
@@ -240,11 +246,34 @@ function CreatePage() {
           <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h2 id="profile-modal-title">{profileStep === "verify" ? "Подтвердите пароль" : "Данные компании"}</h2>
-                <p>{profileStep === "verify" ? "Перед изменением данных подтвердите пароль от аккаунта." : "Измените контактное имя, компанию и город."}</p>
+                <h2 id="profile-modal-title">{profileStep === "view" ? "Данные компании" : profileStep === "verify" ? "Подтвердите пароль" : "Изменение данных"}</h2>
+                <p>{profileStep === "view" ? "Здесь можно посмотреть текущие данные аккаунта." : profileStep === "verify" ? "Перед изменением данных подтвердите пароль от аккаунта." : "Измените контактное имя, компанию и город."}</p>
               </div>
               <button type="button" className="button button-secondary modal-close" onClick={closeProfileModal}>×</button>
             </div>
+
+            {profileStep === "view" ? (
+              <div className="modal-form-grid">
+                <div className="profile-data-grid">
+                  <div className="profile-data-item">
+                    <span>Контактное имя</span>
+                    <strong>{profileForm.displayName || "Не указано"}</strong>
+                  </div>
+                  <div className="profile-data-item">
+                    <span>Название компании</span>
+                    <strong>{profileForm.companyName || "Не указано"}</strong>
+                  </div>
+                  <div className="profile-data-item">
+                    <span>Город</span>
+                    <strong>{profileForm.city || "Не указано"}</strong>
+                  </div>
+                </div>
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={closeProfileModal}>Закрыть</button>
+                  <button type="button" className="button button-primary" onClick={startProfileEdit}>Изменить</button>
+                </div>
+              </div>
+            ) : null}
 
             {profileStep === "verify" ? (
               <form onSubmit={verifyProfilePassword} className="modal-form-grid">
@@ -258,7 +287,9 @@ function CreatePage() {
                   <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Проверка..." : "Продолжить"}</button>
                 </div>
               </form>
-            ) : (
+            ) : null}
+
+            {profileStep === "edit" ? (
               <form onSubmit={saveProfile} className="modal-form-grid">
                 <label className="field">
                   <span>Контактное имя</span>
@@ -278,7 +309,7 @@ function CreatePage() {
                   <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Сохранение..." : "Сохранить"}</button>
                 </div>
               </form>
-            )}
+            ) : null}
           </div>
         </div>
       ) : null}

@@ -1371,6 +1371,28 @@ main {
   gap: 14px;
 }
 
+.profile-data-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-data-item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.profile-data-item span {
+  color: var(--muted);
+}
+
+.profile-data-item strong {
+  font-size: 1.02rem;
+}
+
 .modal-header,
 .modal-actions {
   display: flex;
