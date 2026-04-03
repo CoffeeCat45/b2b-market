@@ -475,13 +475,13 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
       );
     }
 
-    if (req.body.message) {
-      await pool.query(
-        `INSERT INTO chat_messages (id, chat_id, sender_company_id, text, attachments)
-         VALUES ($1, $2, $3, $4, $5::jsonb)`,
-        [`msg-${crypto.randomUUID()}`, chatId, req.user.companyId, String(req.body.message), JSON.stringify([])],
-      );
-    }
+    await pool.query(
+      `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (chat_id, company_id)
+       DO UPDATE SET last_read_at = EXCLUDED.last_read_at`,
+      [chatId, req.user.companyId],
+    );
 
     res.json({ ok: true, chatId });
   } catch (error) {
@@ -496,6 +496,15 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
               ch.subject,
               ch.order_id AS "orderId",
               ch.is_archived AS "isArchived",
+              CASE
+                WHEN $2 = "" THEN 0
+                ELSE COALESCE((SELECT COUNT(*)::integer
+                               FROM chat_messages m
+                               WHERE m.chat_id = ch.id
+                                 AND m.sender_company_id <> $2
+                                 AND m.created_at > COALESCE(cr.last_read_at, 'epoch'::timestamptz)), 0)
+              END AS "unreadCount",
+              to_char(cr.last_read_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastReadAtIso",
               ch.offered_details AS "offeredDetails",
               ch.agreement_details AS "agreementDetails",
               to_char(ch.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt",
@@ -522,13 +531,15 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
               o.budget_label AS "orderBudget",
               o.summary AS "orderSummary",
               o.terms AS "orderTerms",
+              o.company_id AS "orderCompanyId",
               (SELECT m.sender_company_id FROM chat_messages m WHERE m.chat_id = ch.id ORDER BY m.created_at DESC LIMIT 1) AS "lastSenderCompanyId",
               COALESCE((SELECT to_char(m.created_at, 'DD.MM.YYYY HH24:MI') FROM chat_messages m WHERE m.chat_id = ch.id ORDER BY m.created_at DESC LIMIT 1), to_char(ch.created_at, 'DD.MM.YYYY HH24:MI')) AS "lastActivityAt",
-              COALESCE((SELECT json_agg(json_build_object('id', m.id, 'text', m.text, 'createdAt', to_char(m.created_at, 'DD.MM.YYYY HH24:MI'), 'senderCompanyId', m.sender_company_id, 'attachments', m.attachments) ORDER BY m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), '[]'::json) AS messages
+              COALESCE((SELECT json_agg(json_build_object('id', m.id, 'text', m.text, 'createdAt', to_char(m.created_at, 'DD.MM.YYYY HH24:MI'), 'senderCompanyId', m.sender_company_id, 'attachments', m.attachments, 'createdAtIso', to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), '[]'::json) AS messages
        FROM chats ch
        JOIN companies ca ON ca.id = ch.company_a_id
        JOIN companies cb ON cb.id = ch.company_b_id
        LEFT JOIN orders o ON o.id = ch.order_id
+       LEFT JOIN chat_reads cr ON cr.chat_id = ch.id AND cr.company_id = NULLIF($2, '')
        WHERE $1 = 'admin' OR ch.company_a_id = $2 OR ch.company_b_id = $2
        ORDER BY ch.is_archived ASC,
                 COALESCE((SELECT MAX(m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), ch.created_at) DESC,
@@ -538,6 +549,26 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ message: "Не удалось получить чаты.", error: error.message });
+  }
+});
+
+app.post("/api/chats/:id/read", authMiddleware, async (req, res) => {
+  try {
+    const chat = await getChatForUser(req.params.id, req.user);
+    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
+    if (!req.user.companyId) return res.json({ ok: true });
+
+    await pool.query(
+                                                `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (chat_id, company_id)
+       DO UPDATE SET last_read_at = EXCLUDED.last_read_at`,
+      [req.params.id, req.user.companyId],
+    );
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "?? ??????? ???????? ??? ??? ???????????.", error: error.message });
   }
 });
 
@@ -557,7 +588,7 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, isArchived });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ???????? ????? ????.", error: error.message });
+    res.status(500).json({ message: "?? ??????? ???????? ?????? ????.", error: error.message });
   }
 });
 
@@ -602,6 +633,14 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
       [`msg-${crypto.randomUUID()}`, req.params.id, req.user.companyId, text, JSON.stringify(attachments)],
     );
 
+    await pool.query(
+      `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (chat_id, company_id)
+       DO UPDATE SET last_read_at = EXCLUDED.last_read_at`,
+      [req.params.id, req.user.companyId],
+    );
+
     res.status(201).json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Не удалось отправить сообщение.", error: error.message });
@@ -632,4 +671,5 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
 

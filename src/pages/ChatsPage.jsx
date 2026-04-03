@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
@@ -50,6 +50,14 @@ function SendIcon() {
   );
 }
 
+function getLastMessagePreview(chat) {
+  const lastMessage = chat.messages?.[chat.messages.length - 1];
+  if (!lastMessage) return chat.contractTitle;
+  if (lastMessage.text) return lastMessage.text;
+  if (lastMessage.attachments?.length) return `Вложений: ${lastMessage.attachments.length}`;
+  return chat.contractTitle;
+}
+
 function ChatsPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -61,11 +69,13 @@ function ChatsPage() {
   const [error, setError] = useState("");
   const [detailsStatus, setDetailsStatus] = useState("");
   const [agreementDraft, setAgreementDraft] = useState("");
+  const [offeredDraft, setOfferedDraft] = useState("");
   const [offerModalOpen, setOfferModalOpen] = useState(false);
   const [offerForm, setOfferForm] = useState({ price: "", timeline: "", comment: "" });
   const [contextMenu, setContextMenu] = useState(null);
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
+  const openingChatRef = useRef("");
 
   const loadChats = useCallback(async () => {
     try {
@@ -104,7 +114,13 @@ function ChatsPage() {
   useEffect(() => {
     const chatCompany = searchParams.get("chatCompany");
     const orderId = searchParams.get("orderId");
-    if (!user?.companyId || !chatCompany) return;
+    if (!user?.companyId || !chatCompany) return undefined;
+
+    const openKey = `${user.companyId}:${chatCompany}:${orderId || ""}`;
+    if (openingChatRef.current === openKey) return undefined;
+    openingChatRef.current = openKey;
+
+    let cancelled = false;
 
     apiFetch("/chats/open", {
       method: "POST",
@@ -112,16 +128,29 @@ function ChatsPage() {
         companyId: chatCompany,
         orderId,
         subject: orderId ? `Отклик по объявлению ${orderId}` : "Обсуждение сотрудничества",
-        message: orderId ? `Здравствуйте. Интересует ваше объявление ${orderId}.` : "",
       }),
     })
       .then(async (data) => {
+        if (cancelled) return;
         setSidebarMode("active");
         setSelectedChatId(data.chatId);
         setSearchParams(data.chatId ? { chatId: data.chatId } : {});
         await loadChats();
       })
-      .catch((openError) => setError(openError.message));
+      .catch((openError) => {
+        if (!cancelled) {
+          setError(openError.message);
+        }
+      })
+      .finally(() => {
+        if (openingChatRef.current === openKey) {
+          openingChatRef.current = "";
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams, user, loadChats, setSearchParams]);
 
   const filteredChats = useMemo(
@@ -136,10 +165,11 @@ function ChatsPage() {
     setPendingFiles([]);
     setDetailsStatus("");
     setAgreementDraft(selectedChat?.agreementDetails || "");
+    setOfferedDraft(selectedChat?.offeredDetails || "");
     setOfferModalOpen(false);
     setOfferForm({ price: "", timeline: "", comment: "" });
     setContextMenu(null);
-  }, [selectedChatId]);
+  }, [selectedChatId, selectedChat?.agreementDetails, selectedChat?.offeredDetails]);
 
   useEffect(() => {
     if (!selectedChatId) return;
@@ -151,12 +181,47 @@ function ChatsPage() {
   }, [filteredChats, selectedChatId, setSearchParams]);
 
   useEffect(() => {
+    if (!selectedChatId || !selectedChat || !selectedChat.unreadCount || !user?.companyId) return;
+
+    apiFetch(`/chats/${selectedChatId}/read`, { method: "POST" })
+      .then(() => {
+        setChats((current) => current.map((chat) => (
+          chat.id === selectedChatId
+            ? { ...chat, unreadCount: 0, lastReadAtIso: new Date().toISOString() }
+            : chat
+        )));
+      })
+      .catch(() => {});
+  }, [selectedChatId, selectedChat, user]);
+
+  useEffect(() => {
     const textarea = messageInputRef.current;
     if (!textarea) return;
 
     textarea.style.height = "0px";
     textarea.style.height = `${Math.max(48, Math.min(textarea.scrollHeight, 220))}px`;
   }, [messageDraft, selectedChatId]);
+
+  const firstUnreadIndex = useMemo(() => {
+    if (!selectedChat || !user?.companyId || !selectedChat.messages?.length || !selectedChat.unreadCount) return -1;
+
+    const lastReadTime = selectedChat.lastReadAtIso ? Date.parse(selectedChat.lastReadAtIso) : 0;
+
+    return selectedChat.messages.findIndex((message) => (
+      message.senderCompanyId !== user.companyId
+      && Date.parse(message.createdAtIso || "") > lastReadTime
+    ));
+  }, [selectedChat, user]);
+
+  const persistChatDetails = useCallback(async (chatId, nextOfferedDetails, nextAgreementDetails) => {
+    await apiFetch(`/chats/${chatId}/details`, {
+      method: "PUT",
+      body: JSON.stringify({
+        offeredDetails: nextOfferedDetails,
+        agreementDetails: nextAgreementDetails,
+      }),
+    });
+  }, []);
 
   const selectChat = (chatId) => {
     setContextMenu(null);
@@ -224,27 +289,29 @@ function ChatsPage() {
     if (!messageDraft.trim() && pendingFiles.length === 0) return;
 
     try {
+      if (offeredDraft !== (selectedChat.offeredDetails || "") || agreementDraft !== (selectedChat.agreementDetails || "")) {
+        await persistChatDetails(selectedChat.id, offeredDraft, agreementDraft);
+      }
+
       await apiFetch(`/chats/${selectedChat.id}/messages`, {
         method: "POST",
         body: JSON.stringify({ text: messageDraft.trim(), attachments: pendingFiles }),
       });
       setMessageDraft("");
       setPendingFiles([]);
+      setDetailsStatus("");
       await loadChats();
     } catch (messageError) {
       setError(messageError.message);
     }
   };
 
-  const saveAgreement = async () => {
+  const saveDetails = async () => {
     if (!selectedChat) return;
 
     try {
-      await apiFetch(`/chats/${selectedChat.id}/details`, {
-        method: "PUT",
-        body: JSON.stringify({ offeredDetails: selectedChat.offeredDetails || "", agreementDetails: agreementDraft }),
-      });
-      setDetailsStatus("Договорённости сохранены.");
+      await persistChatDetails(selectedChat.id, offeredDraft, agreementDraft);
+      setDetailsStatus("Детали чата сохранены.");
       await loadChats();
     } catch (saveError) {
       setError(saveError.message);
@@ -252,28 +319,17 @@ function ChatsPage() {
     }
   };
 
-  const submitOffer = async () => {
-    if (!selectedChat) return;
-
-    const offeredDetails = formatOfferDetails(offerForm);
-    if (!offeredDetails) {
+  const submitOffer = () => {
+    const nextOfferedDetails = formatOfferDetails(offerForm);
+    if (!nextOfferedDetails) {
       setError("Заполните хотя бы одно поле предложения.");
       return;
     }
 
-    try {
-      await apiFetch(`/chats/${selectedChat.id}/details`, {
-        method: "PUT",
-        body: JSON.stringify({ offeredDetails, agreementDetails: agreementDraft }),
-      });
-      setDetailsStatus("Предложение обновлено.");
-      setOfferModalOpen(false);
-      setOfferForm({ price: "", timeline: "", comment: "" });
-      await loadChats();
-    } catch (saveError) {
-      setError(saveError.message);
-      setDetailsStatus("");
-    }
+    setOfferedDraft(nextOfferedDetails);
+    setDetailsStatus("Предложение подготовлено. Оно сохранится вместе с сообщением или по кнопке ниже.");
+    setOfferModalOpen(false);
+    setOfferForm({ price: "", timeline: "", comment: "" });
   };
 
   if (loading) return null;
@@ -315,6 +371,11 @@ function ChatsPage() {
                     <span className="chat-room-copy">
                       <strong>{chat.otherCompanyName}</strong>
                       <span>{chat.contractTitle}</span>
+                      <span className="chat-room-preview">{getLastMessagePreview(chat)}</span>
+                    </span>
+                    <span className="chat-room-meta">
+                      <span className="chat-room-time">{chat.lastActivityAt}</span>
+                      {chat.unreadCount ? <span className="chat-unread-badge">{chat.unreadCount}</span> : null}
                     </span>
                   </button>
                 )) : <div className="empty-chat-state">{sidebarMode === "archived" ? "В архиве пока нет чатов." : "Пока нет активных чатов."}</div>}
@@ -341,29 +402,37 @@ function ChatsPage() {
               {selectedChat ? (
                 <>
                   <div className="chat-window-header">
-                    <div className="chat-window-title">
+                    <Link to={selectedChat.otherCompanyId ? `/company/${selectedChat.otherCompanyId}` : "#"} className="chat-window-title chat-window-title-link">
                       <span className="chat-room-avatar large">{selectedChat.initials || selectedChat.otherCompanyName.slice(0, 2)}</span>
                       <div>
                         <strong>{selectedChat.otherCompanyName}</strong>
                         <span>{selectedChat.contractTitle}</span>
                       </div>
-                    </div>
+                    </Link>
                   </div>
+                  {selectedChat.orderId ? (
+                    <div className="chat-order-strip">
+                      <Link to={`/listing/${selectedChat.orderId}`} className="chat-order-link">Перейти в объявление</Link>
+                    </div>
+                  ) : null}
                   <div className="chat-window-messages">
-                    {selectedChat.messages.map((message) => (
-                      <article key={message.id} className={message.senderCompanyId === user.companyId ? "chat-bubble own" : "chat-bubble"}>
-                        {message.text ? <p>{message.text}</p> : null}
-                        {message.attachments?.length ? (
-                          <div className="chat-attachments">
-                            {message.attachments.map((attachment) => (
-                              <a key={`${message.id}-${attachment.name}`} href={attachment.dataUrl} download={attachment.name} className="chat-attachment-link">
-                                {attachment.name}
-                              </a>
-                            ))}
-                          </div>
-                        ) : null}
-                        <span className="chat-message-time">{message.createdAt}</span>
-                      </article>
+                    {selectedChat.messages.map((message, index) => (
+                      <div key={message.id} className="chat-message-group">
+                        {firstUnreadIndex === index ? <div className="chat-unread-divider">Непрочитанные сообщения</div> : null}
+                        <article className={message.senderCompanyId === user.companyId ? "chat-bubble own" : "chat-bubble"}>
+                          {message.text ? <p>{message.text}</p> : null}
+                          {message.attachments?.length ? (
+                            <div className="chat-attachments">
+                              {message.attachments.map((attachment) => (
+                                <a key={`${message.id}-${attachment.name}`} href={attachment.dataUrl} download={attachment.name} className="chat-attachment-link">
+                                  {attachment.name}
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                          <span className="chat-message-time">{message.createdAt}</span>
+                        </article>
+                      </div>
                     ))}
                   </div>
                   <div className="chat-compose-panel">
@@ -405,7 +474,7 @@ function ChatsPage() {
                   </div>
                   <div className="chat-details-block">
                     <h3>Что предложили</h3>
-                    <div className="chat-details-preview">{selectedChat.offeredDetails || "Предложение пока не сформировано."}</div>
+                    <div className="chat-details-preview">{offeredDraft || "Предложение пока не сформировано."}</div>
                     <button type="button" className="button button-secondary button-block" onClick={() => setOfferModalOpen(true)}>Предложить условия</button>
                   </div>
                   <div className="chat-details-block">
@@ -413,7 +482,7 @@ function ChatsPage() {
                     <textarea rows="7" value={agreementDraft} onChange={(event) => setAgreementDraft(event.target.value)} placeholder="Запишите согласованные условия, дедлайны, объёмы и следующий шаг." />
                   </div>
                   {detailsStatus ? <div className="success-banner">{detailsStatus}</div> : null}
-                  <button type="button" className="button button-primary button-block" onClick={saveAgreement}>Сохранить договорённости</button>
+                  <button type="button" className="button button-primary button-block" onClick={saveDetails}>Сохранить детали</button>
                 </>
               ) : (
                 <div className="chat-panel-empty">
@@ -449,7 +518,7 @@ function ChatsPage() {
             </div>
             <div className="modal-actions">
               <button type="button" className="button button-secondary" onClick={() => setOfferModalOpen(false)}>Отмена</button>
-              <button type="button" className="button button-primary" onClick={submitOffer}>Сохранить предложение</button>
+              <button type="button" className="button button-primary" onClick={submitOffer}>Подготовить предложение</button>
             </div>
           </div>
         </div>
