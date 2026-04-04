@@ -16,8 +16,9 @@ const SORT_OPTIONS = [
 function OrdersPage() {
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") ?? "";
+  const initialCategory = searchParams.get("category") ?? "";
   const [query, setQuery] = useState(initialQuery);
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState(initialCategory);
   const [dateFilter, setDateFilter] = useState("all");
   const [majorCityInput, setMajorCityInput] = useState("");
   const [appliedMajorCity, setAppliedMajorCity] = useState("");
@@ -123,7 +124,7 @@ function OrdersPage() {
 
   const resetFilters = () => {
     setQuery(initialQuery);
-    setCategory("");
+    setCategory(initialCategory);
     setDateFilter("all");
     setMajorCityInput("");
     setAppliedMajorCity("");

@@ -28,6 +28,28 @@ function HomePage() {
     navigate(`${target}?${params.toString()}`);
   };
 
+  const openFeaturedOrder = () => {
+    if (featuredOrders[0]?.id) {
+      navigate(`/listing/${featuredOrders[0].id}`);
+    } else {
+      navigate("/orders");
+    }
+  };
+
+  const openFeaturedSupplier = () => {
+    if (featuredSuppliers[0]?.companyId) {
+      navigate(`/company/${featuredSuppliers[0].companyId}`);
+    } else {
+      navigate("/suppliers");
+    }
+  };
+
+  const openCategory = (category) => {
+    const params = new URLSearchParams();
+    params.set("category", category);
+    navigate(`/orders?${params.toString()}`);
+  };
+
   return (
     <Layout>
       <section className="hero-section">
@@ -63,16 +85,16 @@ function HomePage() {
           </div>
 
           <div className="hero-panel">
-            <div className="hero-panel-card">
+            <button type="button" className="hero-panel-card card-clickable" onClick={openFeaturedOrder}>
               <p>Сегодня в фокусе</p>
               <strong>{featuredOrders[0]?.title || "Актуальные заказы"}</strong>
               <span>{featuredOrders[0] ? `${featuredOrders[0].company} · ${featuredOrders[0].city}` : "B2B Connect"}</span>
-            </div>
-            <div className="hero-panel-card alternate">
+            </button>
+            <button type="button" className="hero-panel-card alternate card-clickable" onClick={openFeaturedSupplier}>
               <p>Новый поставщик</p>
               <strong>{featuredSuppliers[0]?.name || "Проверенные поставщики"}</strong>
               <span>{featuredSuppliers[0]?.summary || "Компании для B2B-сотрудничества и переговоров."}</span>
-            </div>
+            </button>
           </div>
         </div>
       </section>
@@ -84,10 +106,10 @@ function HomePage() {
           </div>
           <div className="category-grid">
             {categories.map((category) => (
-              <article key={category} className="category-card">
+              <button key={category} type="button" className="category-card card-clickable" onClick={() => openCategory(category)}>
                 <h3>{category}</h3>
                 <p>Подбор подрядчиков и предложений в категории {category.toLowerCase()}.</p>
-              </article>
+              </button>
             ))}
           </div>
         </div>

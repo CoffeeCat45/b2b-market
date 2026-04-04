@@ -370,7 +370,6 @@ function ChatsPage() {
                     <span className="chat-room-avatar">{chat.initials || (chat.otherCompanyName || "Чат").slice(0, 2)}</span>
                     <span className="chat-room-copy">
                       <strong>{chat.otherCompanyName}</strong>
-                      <span>{chat.contractTitle}</span>
                       <span className="chat-room-preview">{getLastMessagePreview(chat)}</span>
                     </span>
                     <span className="chat-room-meta">

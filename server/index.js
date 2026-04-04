@@ -647,6 +647,50 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
   }
 });
 
+app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
+  try {
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "?????? ???????? ????? ???????? ?????." });
+    }
+
+    if (req.user.companyId === req.params.id) {
+      return res.status(400).json({ message: "?????? ???????? ????? ? ????? ????????." });
+    }
+
+    const textValue = String(req.body.text || "").trim();
+    if (!textValue) {
+      return res.status(400).json({ message: "??????? ????? ??????." });
+    }
+
+    const companyResult = await pool.query("SELECT reviews FROM companies WHERE id = $1", [req.params.id]);
+    const company = companyResult.rows[0];
+    if (!company) {
+      return res.status(404).json({ message: "??????? ???????? ?? ??????." });
+    }
+
+    const nextReview = {
+      id: "rev-" + crypto.randomUUID(),
+      author: req.user.displayName || req.user.company || "????????????",
+      authorCompanyId: req.user.companyId,
+      authorCompanyName: req.user.company || "",
+      text: textValue,
+      createdAt: new Date().toISOString(),
+    };
+
+    const currentReviews = Array.isArray(company.reviews) ? company.reviews : [];
+    const nextReviews = [nextReview, ...currentReviews];
+
+    await pool.query(
+      "UPDATE companies SET reviews = $2::jsonb WHERE id = $1",
+      [req.params.id, JSON.stringify(nextReviews)],
+    );
+
+    res.status(201).json({ ok: true, review: nextReview });
+  } catch (error) {
+    res.status(500).json({ message: "?? ??????? ????????? ?????.", error: error.message });
+  }
+});
+
 app.get("/api/companies", async (_req, res) => {
   try {
     const result = await pool.query(`SELECT id, name, city, industry, rating, description, about, specializations, reviews FROM companies ORDER BY id ASC`);
