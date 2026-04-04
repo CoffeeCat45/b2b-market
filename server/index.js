@@ -497,7 +497,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
               ch.order_id AS "orderId",
               ch.is_archived AS "isArchived",
               CASE
-                WHEN $2 = "" THEN 0
+                WHEN $2 = '' THEN 0
                 ELSE COALESCE((SELECT COUNT(*)::integer
                                FROM chat_messages m
                                WHERE m.chat_id = ch.id
