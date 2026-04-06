@@ -1,6 +1,6 @@
 ﻿import { Link } from "react-router-dom";
 
-function CompanyCard({ supplier }) {
+function CompanyCard({ supplier, onTagClick }) {
   const openCard = () => {
     window.open(`#/company/${supplier.companyId}`, "_blank", "noopener,noreferrer");
   };
@@ -20,7 +20,26 @@ function CompanyCard({ supplier }) {
         <h3>{supplier.name}</h3>
         <p className="company-city">{supplier.city}</p>
         <p>{supplier.summary}</p>
-        <div className="card-tags">{supplier.skills.map((skill) => <span key={skill} className="tag">{skill}</span>)}</div>
+        <div className="card-tags">
+          {supplier.skills.map((skill) => (
+            onTagClick ? (
+              <button
+                key={skill}
+                type="button"
+                className="tag tag-button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onTagClick(skill);
+                }}
+              >
+                {skill}
+              </button>
+            ) : (
+              <span key={skill} className="tag">{skill}</span>
+            )
+          ))}
+        </div>
         <div className="card-actions">
           <Link to={`/create?chatCompany=${supplier.companyId}`} className="button button-primary" onClick={(event) => event.stopPropagation()}>Связаться</Link>
         </div>

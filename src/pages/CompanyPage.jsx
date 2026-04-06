@@ -159,8 +159,7 @@ function CompanyPage() {
                   </div>
                   <div className="field">
                     <span>Оставить отзыв</span>
-                    <textarea
-                      rows="5"
+                    <textarea name="reviewText" rows="5"
                       value={reviewText}
                       onChange={(event) => setReviewText(event.target.value)}
                       placeholder="Опишите впечатления от сотрудничества, коммуникации и результата."
@@ -249,3 +248,4 @@ function CompanyPage() {
 }
 
 export default CompanyPage;
+

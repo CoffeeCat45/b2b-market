@@ -125,9 +125,9 @@ function mapAttachments(input) {
 
 async function getChatForUser(chatId, user) {
   const result = await pool.query(
-    `SELECT id, company_a_id AS "companyAId", company_b_id AS "companyBId"
-     FROM chats
-     WHERE id = $1 AND ($2 = 'admin' OR company_a_id = $3 OR company_b_id = $3)`,
+    `SELECT id, company_a_id AS "companyAId", company_b_id AS "companyBId", CASE WHEN $3 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = chats.id AND archive_state.company_id = $3) END AS "isArchived", lifecycle_status AS "lifecycleStatus", pending_status AS "pendingStatus", pending_status_requested_by_company_id AS "pendingStatusRequestedByCompanyId"
+       FROM chats
+       WHERE id = $1 AND ($2 = 'admin' OR company_a_id = $3 OR company_b_id = $3)`,
     [chatId, user.role, user.companyId || ""],
   );
   return result.rows[0] ?? null;
@@ -523,7 +523,10 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
       `SELECT ch.id,
               ch.subject,
               ch.order_id AS "orderId",
-              ch.is_archived AS "isArchived",
+              CASE WHEN $2 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = ch.id AND archive_state.company_id = $2) END AS "isArchived",
+              ch.lifecycle_status AS "lifecycleStatus",
+              ch.pending_status AS "pendingStatus",
+              ch.pending_status_requested_by_company_id AS "pendingStatusRequestedByCompanyId",
               CASE
                 WHEN $2 = '' THEN 0
                 ELSE COALESCE((SELECT COUNT(*)::integer
@@ -569,7 +572,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
        LEFT JOIN orders o ON o.id = ch.order_id
        LEFT JOIN chat_reads cr ON cr.chat_id = ch.id AND cr.company_id = NULLIF($2, '')
        WHERE $1 = 'admin' OR ch.company_a_id = $2 OR ch.company_b_id = $2
-       ORDER BY ch.is_archived ASC,
+       ORDER BY CASE WHEN $2 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = ch.id AND archive_state.company_id = $2) END ASC,
                 COALESCE((SELECT MAX(m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), ch.created_at) DESC,
                 ch.created_at DESC`,
       [req.user.role, req.user.companyId || ""],
@@ -604,19 +607,33 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
+    if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ???????????? ???." });
 
     const isArchived = Boolean(req.body.isArchived);
 
-    await pool.query(
-      `UPDATE chats
-       SET is_archived = $2
-       WHERE id = $1`,
-      [req.params.id, isArchived],
-    );
+    if (isArchived) {
+      if ((chat.lifecycleStatus || "active") !== "closed") {
+        return res.status(400).json({ message: "????????? ??? ? ????? ????? ?????? ????? ??????? ???????." });
+      }
+
+      await pool.query(
+        `INSERT INTO chat_archives (chat_id, company_id, archived_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (chat_id, company_id)
+         DO UPDATE SET archived_at = EXCLUDED.archived_at`,
+        [req.params.id, req.user.companyId],
+      );
+    } else {
+      await pool.query(
+        `DELETE FROM chat_archives
+         WHERE chat_id = $1 AND company_id = $2`,
+        [req.params.id, req.user.companyId],
+      );
+    }
 
     res.json({ ok: true, isArchived });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ???????? ?????? ????.", error: error.message });
+    res.status(500).json({ message: "?? ??????? ???????? ????? ????.", error: error.message });
   }
 });
 
@@ -639,6 +656,78 @@ app.put("/api/chats/:id/details", authMiddleware, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Не удалось обновить данные чата.", error: error.message });
+  }
+});
+
+app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
+  try {
+    const chat = await getChatForUser(req.params.id, req.user);
+    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
+    if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ?????? ?????? ???????????." });
+
+    const nextStatus = String(req.body.status || "").trim();
+    const allowedStatuses = ["active", "negotiation", "closed"];
+    if (!allowedStatuses.includes(nextStatus)) {
+      return res.status(400).json({ message: "???????????? ?????? ???????????." });
+    }
+
+    const currentStatus = chat.lifecycleStatus || "active";
+    if (nextStatus === currentStatus && !chat.pendingStatus) {
+      return res.json({ ok: true, lifecycleStatus: chat.lifecycleStatus || "active", isArchived: chat.isArchived, pendingStatus: null });
+    }
+
+    await pool.query(
+      `UPDATE chats
+       SET pending_status = $2,
+           pending_status_requested_by_company_id = $3
+       WHERE id = $1`,
+      [req.params.id, nextStatus, req.user.companyId],
+    );
+
+    res.json({ ok: true, pendingStatus: nextStatus });
+  } catch (error) {
+    res.status(500).json({ message: "?? ??????? ????????? ?????? ?? ????? ???????.", error: error.message });
+  }
+});
+
+app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, res) => {
+  try {
+    const chat = await getChatForUser(req.params.id, req.user);
+    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
+    if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ???????????? ?????? ???????????." });
+    if (!chat.pendingStatus) return res.status(400).json({ message: "??? ????????? ??????? ?? ????? ???????." });
+    if (chat.pendingStatusRequestedByCompanyId === req.user.companyId) {
+      return res.status(403).json({ message: "?????? ??????????? ??????????? ?????? ?? ????? ???????." });
+    }
+
+    const accepted = Boolean(req.body.accepted);
+
+    if (accepted) {
+      const nextLifecycleStatus = chat.pendingStatus;
+
+      await pool.query(
+        `UPDATE chats
+         SET lifecycle_status = $2,
+             pending_status = NULL,
+             pending_status_requested_by_company_id = NULL
+         WHERE id = $1`,
+        [req.params.id, nextLifecycleStatus],
+      );
+
+      return res.json({ ok: true, accepted: true, lifecycleStatus: nextLifecycleStatus });
+    }
+
+    await pool.query(
+      `UPDATE chats
+       SET pending_status = NULL,
+           pending_status_requested_by_company_id = NULL
+       WHERE id = $1`,
+      [req.params.id],
+    );
+
+    res.json({ ok: true, accepted: false });
+  } catch (error) {
+    res.status(500).json({ message: "?? ??????? ?????????? ?????? ?? ????? ???????.", error: error.message });
   }
 });
 

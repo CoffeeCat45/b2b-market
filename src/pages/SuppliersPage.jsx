@@ -32,7 +32,7 @@ function SuppliersPage() {
     const normalizedMax = maxRating ? Number(maxRating) : null;
 
     const nextSuppliers = suppliers.filter((item) => {
-      const matchesQuery = !query || `${item.name} ${item.summary} ${item.description}`.toLowerCase().includes(query.toLowerCase());
+      const matchesQuery = !query || `${item.name} ${item.summary} ${item.description} ${item.skills.join(" ")}`.toLowerCase().includes(query.toLowerCase());
       const matchesCategory = !category || item.industry === category;
       const matchesDate = matchesDateFilter(item.createdAt, dateFilter);
       const matchesCity = !selectedCities.length || selectedCities.includes(item.city);
@@ -117,7 +117,7 @@ function SuppliersPage() {
                 </label>
               </div>
               <div className="catalog-list company-list">
-                {filteredSuppliers.map((item) => <CompanyCard key={item.id} supplier={item} />)}
+                {filteredSuppliers.map((item) => <CompanyCard key={item.id} supplier={item} onTagClick={setQuery} />)}
               </div>
             </div>
           </div>
@@ -128,3 +128,5 @@ function SuppliersPage() {
 }
 
 export default SuppliersPage;
+
+

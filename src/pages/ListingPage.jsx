@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -10,6 +10,7 @@ function ListingPage() {
   const { user } = useAuth();
   const { orders, companies, reload } = useMarketplaceData();
   const [viewsCount, setViewsCount] = useState(null);
+  const viewedOrderIdsRef = useRef(new Set());
   const item = orders.find((entry) => entry.id === id);
 
   useEffect(() => {
@@ -18,23 +19,27 @@ function ListingPage() {
     }
   }, [item]);
 
-  const registerView = useCallback(async () => {
-    if (!id) return;
-
-    try {
-      const data = await apiFetch(`/orders/${id}/view`, { method: "POST" });
-      setViewsCount(data.viewsCount ?? 0);
-      if (user) {
-        await reload();
-      }
-    } catch {
-    }
-  }, [id, reload, user]);
-
   useEffect(() => {
-    if (!item) return;
+    if (!item || viewedOrderIdsRef.current.has(item.id)) {
+      return;
+    }
+
+    viewedOrderIdsRef.current.add(item.id);
+
+    const registerView = async () => {
+      try {
+        const data = await apiFetch(`/orders/${item.id}/view`, { method: "POST" });
+        setViewsCount(data.viewsCount ?? 0);
+
+        if (user) {
+          await reload();
+        }
+      } catch {
+      }
+    };
+
     registerView();
-  }, [item, registerView]);
+  }, [item, reload, user]);
 
   if (!item) {
     return (

@@ -1718,3 +1718,81 @@ main {
     width: 100%;
   }
 }
+
+.tag-button {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.chat-status-control {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.chat-status-caption {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.chat-status-select,
+.chat-status-chip {
+  min-width: 170px;
+  min-height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(36, 107, 255, 0.2);
+  background: #f7faff;
+  color: var(--navy);
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+.chat-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-status-request-banner {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(36, 107, 255, 0.18);
+  background: #eef4ff;
+}
+
+.chat-status-request-banner.pending {
+  background: #f8fafc;
+  border-color: rgba(18, 48, 91, 0.12);
+}
+
+.chat-status-request-banner p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.chat-status-request-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .chat-window-header {
+    align-items: start;
+  }
+
+  .chat-status-control {
+    justify-items: stretch;
+  }
+
+  .chat-status-select,
+  .chat-status-chip {
+    min-width: 0;
+    width: 100%;
+  }
+}

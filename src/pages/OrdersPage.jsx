@@ -76,7 +76,7 @@ function OrdersPage() {
     const locationQuery = appliedLocation.trim().toLowerCase();
 
     const nextOrders = orders.filter((item) => {
-      const matchesQuery = !query || `${item.title} ${item.company} ${item.summary}`.toLowerCase().includes(query.toLowerCase());
+      const matchesQuery = !query || `${item.title} ${item.company} ${item.summary} ${item.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase());
       const matchesCategory = !category || item.category === category;
       const matchesDate = matchesDateFilter(item.date, dateFilter);
       const matchesMajorCity = !majorCityQuery || (item.cityMajor || "").toLowerCase() === majorCityQuery;
@@ -205,7 +205,7 @@ function OrdersPage() {
                 </label>
               </div>
               <div className="catalog-list">
-                {filteredOrders.map((item) => <ListingCard key={item.id} item={item} />)}
+                {filteredOrders.map((item) => <ListingCard key={item.id} item={item} onTagClick={setQuery} />)}
               </div>
             </div>
           </div>
@@ -216,3 +216,5 @@ function OrdersPage() {
 }
 
 export default OrdersPage;
+
+

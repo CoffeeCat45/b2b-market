@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 export function useMarketplaceData() {
@@ -8,7 +8,7 @@ export function useMarketplaceData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
 
@@ -27,11 +27,11 @@ export function useMarketplaceData() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   return { orders, suppliers, companies, loading, error, reload: load };
 }

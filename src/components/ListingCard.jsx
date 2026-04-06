@@ -1,6 +1,6 @@
 ﻿import { Link } from "react-router-dom";
 
-function ListingCard({ item, featured = false }) {
+function ListingCard({ item, featured = false, onTagClick }) {
   const openCard = () => {
     window.open(`#/listing/${item.id}`, "_blank", "noopener,noreferrer");
   };
@@ -32,9 +32,24 @@ function ListingCard({ item, featured = false }) {
       <p>{item.summary}</p>
       <div className="card-tags">
         {item.tags.map((tag) => (
-          <span key={tag} className="tag">
-            {tag}
-          </span>
+          onTagClick ? (
+            <button
+              key={tag}
+              type="button"
+              className="tag tag-button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onTagClick(tag);
+              }}
+            >
+              {tag}
+            </button>
+          ) : (
+            <span key={tag} className="tag">
+              {tag}
+            </span>
+          )
         ))}
       </div>
       <div className="card-actions">

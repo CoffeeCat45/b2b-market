@@ -5,6 +5,13 @@ import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 
 const ACCEPTED_FILES = ["application/pdf", "image/jpeg", "image/png"];
+const CHAT_STATUS_OPTIONS = [
+  { value: "active", label: "Активно" },
+  { value: "negotiation", label: "В переговорах" },
+  { value: "closed", label: "Закрыто" },
+  { value: "archived", label: "В архиве" },
+];
+const CHAT_STATUS_LABELS = Object.fromEntries(CHAT_STATUS_OPTIONS.map((item) => [item.value, item.label]));
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -33,6 +40,25 @@ function formatOfferDetails({ price, timeline, comment }) {
   return parts.join("\n");
 }
 
+function getLastMessagePreview(chat) {
+  const lastMessage = chat.messages?.[chat.messages.length - 1];
+  if (!lastMessage) return chat.contractTitle;
+  if (lastMessage.text) return lastMessage.text;
+  if (lastMessage.attachments?.length) return `Вложений: ${lastMessage.attachments.length}`;
+  return chat.contractTitle;
+}
+
+function getChatBaseStatus(chat) {
+  if (!chat) return "active";
+  return chat.lifecycleStatus || "active";
+}
+
+function getChatStatusValue(chat) {
+  if (!chat) return "active";
+  if (chat.isArchived) return "archived";
+  return getChatBaseStatus(chat);
+}
+
 function FileIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -50,14 +76,6 @@ function SendIcon() {
   );
 }
 
-function getLastMessagePreview(chat) {
-  const lastMessage = chat.messages?.[chat.messages.length - 1];
-  if (!lastMessage) return chat.contractTitle;
-  if (lastMessage.text) return lastMessage.text;
-  if (lastMessage.attachments?.length) return `Вложений: ${lastMessage.attachments.length}`;
-  return chat.contractTitle;
-}
-
 function ChatsPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -73,6 +91,7 @@ function ChatsPage() {
   const [offerModalOpen, setOfferModalOpen] = useState(false);
   const [offerForm, setOfferForm] = useState({ price: "", timeline: "", comment: "" });
   const [contextMenu, setContextMenu] = useState(null);
+  const [statusBusy, setStatusBusy] = useState(false);
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
   const openingChatRef = useRef("");
@@ -159,6 +178,10 @@ function ChatsPage() {
   );
 
   const selectedChat = chats.find((chat) => chat.id === selectedChatId) || null;
+  const baseStatusValue = getChatBaseStatus(selectedChat);
+  const currentStatusValue = getChatStatusValue(selectedChat);
+  const incomingStatusRequest = Boolean(selectedChat?.pendingStatus && user?.companyId && selectedChat.pendingStatusRequestedByCompanyId !== user.companyId);
+  const outgoingStatusRequest = Boolean(selectedChat?.pendingStatus && user?.companyId && selectedChat.pendingStatusRequestedByCompanyId === user.companyId);
 
   useEffect(() => {
     setMessageDraft("");
@@ -281,6 +304,49 @@ function ChatsPage() {
       await loadChats();
     } catch (archiveError) {
       setError(archiveError.message);
+    }
+  };
+
+  const requestStatusChange = async (nextStatus) => {
+    if (!selectedChat || !user?.companyId || statusBusy) return;
+    if (nextStatus === currentStatusValue && !selectedChat.pendingStatus) return;
+
+    try {
+      setStatusBusy(true);
+      setDetailsStatus("");
+      await apiFetch(`/chats/${selectedChat.id}/status-request`, {
+        method: "PUT",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      setDetailsStatus(`Запрос на статус "${CHAT_STATUS_LABELS[nextStatus]}" отправлен.`);
+      await loadChats();
+    } catch (statusError) {
+      setError(statusError.message);
+    } finally {
+      setStatusBusy(false);
+    }
+  };
+
+  const respondToStatusRequest = async (accepted) => {
+    if (!selectedChat || !selectedChat.pendingStatus || statusBusy) return;
+
+    try {
+      setStatusBusy(true);
+      setDetailsStatus("");
+      const pendingStatus = selectedChat.pendingStatus;
+      await apiFetch(`/chats/${selectedChat.id}/status-request/respond`, {
+        method: "POST",
+        body: JSON.stringify({ accepted }),
+      });
+      if (accepted && pendingStatus === "archived") {
+        setSidebarMode("archived");
+      }
+      setDetailsStatus(accepted ? "Статус обновлён для обеих компаний." : "Запрос на смену статуса отклонён.");
+      await loadChats();
+    } catch (statusError) {
+      setError(statusError.message);
+    } finally {
+      setStatusBusy(false);
     }
   };
 
@@ -408,10 +474,42 @@ function ChatsPage() {
                         <span>{selectedChat.contractTitle}</span>
                       </div>
                     </Link>
+                    <div className="chat-status-control">
+                      <span className="chat-status-caption">Статус</span>
+                      {user.companyId ? (
+                        <select
+                          className="chat-status-select"
+                          value={currentStatusValue}
+                          onChange={(event) => requestStatusChange(event.target.value)}
+                          disabled={statusBusy || Boolean(selectedChat.pendingStatus)}
+                        >
+                          {CHAT_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value} disabled={option.value === "archived" && !selectedChat?.isArchived && baseStatusValue !== "closed"}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="chat-status-chip">{CHAT_STATUS_LABELS[currentStatusValue]}</span>
+                      )}
+                    </div>
                   </div>
                   {selectedChat.orderId ? (
                     <div className="chat-order-strip">
                       <Link to={`/listing/${selectedChat.orderId}`} className="chat-order-link">Перейти в объявление</Link>
+                    </div>
+                  ) : null}
+                  {incomingStatusRequest ? (
+                    <div className="chat-status-request-banner">
+                      <p>{selectedChat.otherCompanyName} хочет сменить статус на {CHAT_STATUS_LABELS[selectedChat.pendingStatus]}.</p>
+                      <div className="chat-status-request-actions">
+                        <button type="button" className="button button-primary" onClick={() => respondToStatusRequest(true)} disabled={statusBusy}>Принять</button>
+                        <button type="button" className="button button-secondary" onClick={() => respondToStatusRequest(false)} disabled={statusBusy}>Отклонить</button>
+                      </div>
+                    </div>
+                  ) : outgoingStatusRequest ? (
+                    <div className="chat-status-request-banner pending">
+                      <p>Запрос на статус {CHAT_STATUS_LABELS[selectedChat.pendingStatus]} отправлен. Ждём подтверждения второй стороны.</p>
                     </div>
                   ) : null}
                   <div className="chat-window-messages">

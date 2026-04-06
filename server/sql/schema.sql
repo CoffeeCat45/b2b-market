@@ -121,3 +121,19 @@ CREATE TABLE IF NOT EXISTS chat_reads (
   last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (chat_id, company_id)
 );
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'active';
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS pending_status TEXT;
+
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS pending_status_requested_by_company_id TEXT REFERENCES companies(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS chat_archives (
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (chat_id, company_id)
+);

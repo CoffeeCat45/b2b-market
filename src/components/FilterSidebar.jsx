@@ -46,12 +46,12 @@ function FilterSidebar({
 
       <label className="field">
         <span>Поиск</span>
-        <input value={searchValue} onChange={(event) => onSearchChange(event.target.value)} />
+        <input name="filterSearch" value={searchValue} onChange={(event) => onSearchChange(event.target.value)} />
       </label>
 
       <label className="field">
         <span>Категория</span>
-        <select value={selectedCategory} onChange={(event) => onCategoryChange(event.target.value)}>
+        <select name="filterCategory" value={selectedCategory} onChange={(event) => onCategoryChange(event.target.value)}>
           <option value="">Все категории</option>
           {categories.map((item) => (
             <option key={item} value={item}>
@@ -64,7 +64,7 @@ function FilterSidebar({
       {dateFilterOptions.length ? (
         <label className="field">
           <span>{dateFilterLabel}</span>
-          <select value={dateFilterValue} onChange={(event) => onDateFilterChange(event.target.value)}>
+          <select name="filterDate" value={dateFilterValue} onChange={(event) => onDateFilterChange(event.target.value)}>
             {dateFilterOptions.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
@@ -79,6 +79,7 @@ function FilterSidebar({
           <label className="field city-field">
             <span>{majorCityLabel}</span>
             <input
+              name="majorCity"
               value={selectedMajorCity}
               onFocus={() => setMajorCityFocused(true)}
               onChange={(event) => onMajorCityChange?.(event.target.value)}
@@ -113,6 +114,7 @@ function FilterSidebar({
             <label className="field city-field">
               <span>{locationLabel}</span>
               <input
+                name="locationDetail"
                 value={selectedLocation}
                 onFocus={() => setLocationFocused(true)}
                 onChange={(event) => onLocationChange?.(event.target.value)}
@@ -151,6 +153,7 @@ function FilterSidebar({
             {cityOptions.map((city) => (
               <label key={city} className="checkbox-item">
                 <input
+                  name={`city-${city}`}
                   type="checkbox"
                   checked={selectedCities.includes(city)}
                   onChange={() => onToggleCity(city)}
@@ -166,6 +169,7 @@ function FilterSidebar({
         <span>{rangeTitle}</span>
         <div className="range-grid">
           <input
+            name="rangeMin"
             type="number"
             min="0"
             step="1"
@@ -174,6 +178,7 @@ function FilterSidebar({
             placeholder={minPlaceholder}
           />
           <input
+            name="rangeMax"
             type="number"
             min="0"
             step="1"

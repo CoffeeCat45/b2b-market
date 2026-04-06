@@ -5,6 +5,7 @@ import SearchBar from "../components/SearchBar";
 import ListingCard from "../components/ListingCard";
 import CompanyCard from "../components/CompanyCard";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
+import { parseRussianDate } from "../lib/date";
 
 function HomePage() {
   const navigate = useNavigate();
@@ -15,6 +16,15 @@ function HomePage() {
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
   const featuredOrders = useMemo(() => orders.slice(0, 6), [orders]);
   const featuredSuppliers = useMemo(() => suppliers.slice(0, 3), [suppliers]);
+  const focusOrder = useMemo(() => {
+    const freshestOrders = [...orders]
+      .sort((a, b) => (parseRussianDate(b.date)?.getTime() || 0) - (parseRussianDate(a.date)?.getTime() || 0))
+      .slice(0, 5);
+
+    if (!freshestOrders.length) return null;
+
+    return freshestOrders[Math.floor(Math.random() * freshestOrders.length)];
+  }, [orders]);
 
   const handleSearch = (event) => {
     event.preventDefault();
@@ -29,8 +39,8 @@ function HomePage() {
   };
 
   const openFeaturedOrder = () => {
-    if (featuredOrders[0]?.id) {
-      navigate(`/listing/${featuredOrders[0].id}`);
+    if (focusOrder?.id) {
+      navigate(`/listing/${focusOrder.id}`);
     } else {
       navigate("/orders");
     }
@@ -87,8 +97,8 @@ function HomePage() {
           <div className="hero-panel">
             <button type="button" className="hero-panel-card card-clickable" onClick={openFeaturedOrder}>
               <p>Сегодня в фокусе</p>
-              <strong>{featuredOrders[0]?.title || "Актуальные заказы"}</strong>
-              <span>{featuredOrders[0] ? `${featuredOrders[0].company} · ${featuredOrders[0].city}` : "B2B Connect"}</span>
+              <strong>{focusOrder?.title || "Актуальные заказы"}</strong>
+              <span>{focusOrder ? `${focusOrder.company} · ${focusOrder.city}` : "B2B Connect"}</span>
             </button>
             <button type="button" className="hero-panel-card alternate card-clickable" onClick={openFeaturedSupplier}>
               <p>Новый поставщик</p>
