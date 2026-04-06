@@ -16,7 +16,7 @@ const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "imag
 async function getUserByToken(token) {
   if (!token) return null;
   const result = await pool.query(
-    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity"
+    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN companies c ON c.id = u.company_id
@@ -182,12 +182,13 @@ app.post("/api/auth/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     await client.query(
-      `INSERT INTO companies (id, name, city, industry, rating, description, about, specializations, reviews)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)`,
+      `INSERT INTO companies (id, name, city, phone, industry, rating, description, about, specializations, reviews)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)`,
       [
         companyId,
         companyName,
         city,
+        "",
         industry,
         0,
         `${companyName} зарегистрирована на платформе B2B Connect.`,
@@ -218,6 +219,11 @@ app.post("/api/auth/register", async (req, res) => {
         displayName,
         company: companyName,
         companyCity: city,
+        companyPhone: "",
+        industry,
+        description: `${companyName} ???????????????? ?? ????????? B2B Connect.`,
+        about: `${companyName} ???????? ? ????????? "${industry}" ? ????? ??????????? ??????????, ?????? ??????????? ? ????? ?????????? ? ?????.`,
+        specializations: [industry],
       },
     });
   } catch (error) {
@@ -276,11 +282,23 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
   try {
     const currentPassword = String(req.body.currentPassword || "");
     const displayName = String(req.body.displayName || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
     const companyName = String(req.body.companyName || "").trim();
     const city = String(req.body.city || "").trim();
+    const phone = String(req.body.phone || "").trim();
+    const industry = String(req.body.industry || "").trim();
+    const description = String(req.body.description || "").trim();
+    const about = String(req.body.about || "").trim();
+    const specializations = Array.isArray(req.body.specializations)
+      ? req.body.specializations.map((item) => String(item || "").trim()).filter(Boolean)
+      : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
 
     if (!displayName) {
       return res.status(400).json({ message: "??????? ?????????? ???." });
+    }
+
+    if (!email || !/^S+@S+.S+$/.test(email)) {
+      return res.status(400).json({ message: "??????? ?????????? email." });
     }
 
     const userResult = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
@@ -292,15 +310,25 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     }
 
     await client.query("BEGIN");
-    await client.query("UPDATE users SET display_name = $2 WHERE id = $1", [req.user.id, displayName]);
+
+    const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, req.user.id]);
+    if (existingUser.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "???????????? ? ????? email ??? ??????????." });
+    }
+
+    await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [req.user.id, displayName, email]);
 
     if (req.user.companyId) {
-      if (!companyName || !city) {
+      if (!companyName || !city || !industry || !description || !about) {
         await client.query("ROLLBACK");
-        return res.status(400).json({ message: "??????? ???????? ???????? ? ?????." });
+        return res.status(400).json({ message: "????????? ???????? ????????, ?????, ???????, ???????? ? ???? ? ????????." });
       }
 
-      await client.query("UPDATE companies SET name = $2, city = $3 WHERE id = $1", [req.user.companyId, companyName, city]);
+      await client.query(
+        "UPDATE companies SET name = $2, city = $3, phone = $4, industry = $5, description = $6, about = $7, specializations = $8::jsonb WHERE id = $1",
+        [req.user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations)],
+      );
     }
 
     await client.query("COMMIT");
@@ -693,7 +721,7 @@ app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
 
 app.get("/api/companies", async (_req, res) => {
   try {
-    const result = await pool.query(`SELECT id, name, city, industry, rating, description, about, specializations, reviews FROM companies ORDER BY id ASC`);
+    const result = await pool.query(`SELECT id, name, city, phone, industry, rating, description, about, specializations, reviews FROM companies ORDER BY id ASC`);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ message: "Не удалось получить список компаний.", error: error.message });

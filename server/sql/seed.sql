@@ -1,6 +1,6 @@
 ﻿TRUNCATE order_views, chat_messages, chats, contract_requests, sessions, suppliers, orders, users, companies RESTART IDENTITY CASCADE;
 
-INSERT INTO companies (id, name, city, industry, rating, description, about, specializations, reviews)
+INSERT INTO companies (id, name, city, phone, industry, rating, description, about, specializations, reviews)
 VALUES
   ('cmp-1','North Beans','Екатеринбург','HoReCa',4.8,'Сеть кофеен и обжарочное производство. Работаем с локальными и федеральными поставщиками.','North Beans развивает собственную сеть кофеен и корпоративные поставки. Ищет надежных подрядчиков для роста.','["Оптовые поставки", "HoReCa", "Розница"]'::jsonb,'[{"id":"r1","author":"ПартнерПак","text":"Четкое ТЗ и быстрая обратная связь."}]'::jsonb),
   ('cmp-2','ТехноПласт','Казань','Производство',4.6,'Производитель промышленных пластиковых компонентов для B2B-сектора.','Компания выпускает серийные и заказные изделия для строительной и промышленной отрасли.','["Производство", "Пластик", "Промышленность"]'::jsonb,'[{"id":"r2","author":"WebLine Studio","text":"Команда быстро согласует этапы и дает обратную связь."}]'::jsonb),

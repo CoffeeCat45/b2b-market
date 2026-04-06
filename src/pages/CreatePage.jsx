@@ -21,7 +21,17 @@ function CreatePage() {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileStep, setProfileStep] = useState("view");
   const [profilePassword, setProfilePassword] = useState("");
-  const [profileForm, setProfileForm] = useState({ displayName: "", companyName: "", city: "" });
+  const [profileForm, setProfileForm] = useState({
+    displayName: "",
+    email: "",
+    companyName: "",
+    city: "",
+    phone: "",
+    industry: "",
+    description: "",
+    about: "",
+    specializations: "",
+  });
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
 
@@ -64,8 +74,14 @@ function CreatePage() {
     setProfileError("");
     setProfileForm({
       displayName: user?.displayName || "",
+      email: user?.email || "",
       companyName: currentCompany?.name || user?.company || "",
       city: currentCompany?.city || user?.companyCity || "",
+      phone: currentCompany?.phone || user?.companyPhone || "",
+      industry: currentCompany?.industry || user?.industry || "",
+      description: currentCompany?.description || user?.description || "",
+      about: currentCompany?.about || user?.about || "",
+      specializations: (currentCompany?.specializations || user?.specializations || []).join(", "),
     });
   };
 
@@ -112,8 +128,14 @@ function CreatePage() {
         body: JSON.stringify({
           currentPassword: profilePassword,
           displayName: profileForm.displayName,
+          email: profileForm.email,
           companyName: profileForm.companyName,
           city: profileForm.city,
+          phone: profileForm.phone,
+          industry: profileForm.industry,
+          description: profileForm.description,
+          about: profileForm.about,
+          specializations: profileForm.specializations,
         }),
       });
       updateUser(data.user);
@@ -187,9 +209,14 @@ function CreatePage() {
               <h1>{editingId ? "Редактирование объявления" : "Кабинет компании"}</h1>
               <div className="dashboard-top-actions">
                 {user.role === "company" ? (
-                  <button type="button" className="button button-secondary" onClick={openProfileModal}>
-                    Данные
-                  </button>
+                  <>
+                    <Link to={`/company/${user.companyId}`} className="button button-secondary">
+                      Профиль компании
+                    </Link>
+                    <button type="button" className="button button-secondary" onClick={openProfileModal}>
+                      Данные
+                    </button>
+                  </>
                 ) : null}
                 <Link to="/chats" className="button button-secondary">
                   Открыть чаты
@@ -247,7 +274,7 @@ function CreatePage() {
             <div className="modal-header">
               <div>
                 <h2 id="profile-modal-title">{profileStep === "view" ? "Данные компании" : profileStep === "verify" ? "Подтвердите пароль" : "Изменение данных"}</h2>
-                <p>{profileStep === "view" ? "Здесь можно посмотреть текущие данные аккаунта." : profileStep === "verify" ? "Перед изменением данных подтвердите пароль от аккаунта." : "Измените контактное имя, компанию и город."}</p>
+                <p>{profileStep === "view" ? "Здесь можно посмотреть текущие данные аккаунта." : profileStep === "verify" ? "Перед изменением данных подтвердите пароль от аккаунта." : "Измените контакты, описание, отрасль и теги компании."}</p>
               </div>
               <button type="button" className="button button-secondary modal-close" onClick={closeProfileModal}>×</button>
             </div>
@@ -255,18 +282,15 @@ function CreatePage() {
             {profileStep === "view" ? (
               <div className="modal-form-grid">
                 <div className="profile-data-grid">
-                  <div className="profile-data-item">
-                    <span>Контактное имя</span>
-                    <strong>{profileForm.displayName || "Не указано"}</strong>
-                  </div>
-                  <div className="profile-data-item">
-                    <span>Название компании</span>
-                    <strong>{profileForm.companyName || "Не указано"}</strong>
-                  </div>
-                  <div className="profile-data-item">
-                    <span>Город</span>
-                    <strong>{profileForm.city || "Не указано"}</strong>
-                  </div>
+                  <div className="profile-data-item"><span>Контактное имя</span><strong>{profileForm.displayName || "Не указано"}</strong></div>
+                  <div className="profile-data-item"><span>Email</span><strong>{profileForm.email || "Не указано"}</strong></div>
+                  <div className="profile-data-item"><span>Название компании</span><strong>{profileForm.companyName || "Не указано"}</strong></div>
+                  <div className="profile-data-item"><span>Город</span><strong>{profileForm.city || "Не указано"}</strong></div>
+                  <div className="profile-data-item"><span>Телефон</span><strong>{profileForm.phone || "Не указано"}</strong></div>
+                  <div className="profile-data-item"><span>Отрасль</span><strong>{profileForm.industry || "Не указано"}</strong></div>
+                  <div className="profile-data-item profile-data-item-wide"><span>Описание компании</span><strong>{profileForm.description || "Не указано"}</strong></div>
+                  <div className="profile-data-item profile-data-item-wide"><span>О компании</span><strong>{profileForm.about || "Не указано"}</strong></div>
+                  <div className="profile-data-item profile-data-item-wide"><span>Теги</span><strong>{profileForm.specializations || "Не указано"}</strong></div>
                 </div>
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Закрыть</button>
@@ -291,18 +315,15 @@ function CreatePage() {
 
             {profileStep === "edit" ? (
               <form onSubmit={saveProfile} className="modal-form-grid">
-                <label className="field">
-                  <span>Контактное имя</span>
-                  <input value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Название компании</span>
-                  <input value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>Город</span>
-                  <input value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} />
-                </label>
+                <label className="field"><span>Контактное имя</span><input value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
+                <label className="field"><span>Email</span><input value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
+                <label className="field"><span>Название компании</span><input value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
+                <label className="field"><span>Город</span><input value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
+                <label className="field"><span>Телефон</span><input value={profileForm.phone} onChange={(event) => updateProfileField("phone", event.target.value)} placeholder="+7 (900) 000-00-00" /></label>
+                <label className="field"><span>Отрасль</span><input value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
+                <label className="field field-wide"><span>Описание компании</span><textarea rows="4" value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
+                <label className="field field-wide"><span>О компании</span><textarea rows="5" value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
+                <label className="field field-wide"><span>Теги</span><input value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>

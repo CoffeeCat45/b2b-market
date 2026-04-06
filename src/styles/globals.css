@@ -597,6 +597,39 @@ main {
 .review-list {
   display: grid;
   gap: 18px;
+  margin-top: 24px;
+}
+
+.review-form {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0 0;
+}
+
+.review-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 6px;
+  margin-bottom: 10px;
+}
+
+.review-author-link {
+  color: var(--navy);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.review-author-link:hover {
+  text-decoration: underline;
+}
+
+.review-date,
+.review-subtitle {
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .empty-state {
@@ -1557,6 +1590,10 @@ main {
   border: 1px solid var(--line);
   border-radius: 16px;
   background: #fff;
+}
+
+.profile-data-item-wide {
+  grid-column: 1 / -1;
 }
 
 .profile-data-item span {
