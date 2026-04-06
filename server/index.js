@@ -221,8 +221,8 @@ app.post("/api/auth/register", async (req, res) => {
         companyCity: city,
         companyPhone: "",
         industry,
-        description: `${companyName} ???????????????? ?? ????????? B2B Connect.`,
-        about: `${companyName} ???????? ? ????????? "${industry}" ? ????? ??????????? ??????????, ?????? ??????????? ? ????? ?????????? ? ?????.`,
+        description: `${companyName} зарегистрирована на платформе B2B Connect.`,
+        about: `${companyName} работает в категории "${industry}" и может публиковать объявления, искать поставщиков и вести переговоры в чатах.`,
         specializations: [industry],
       },
     });
@@ -314,7 +314,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, req.user.id]);
     if (existingUser.rows[0]) {
       await client.query("ROLLBACK");
-      return res.status(409).json({ message: "???????????? ? ????? email ??? ??????????." });
+      return res.status(409).json({ message: "Пользователь с таким email уже существует." });
     }
 
     await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [req.user.id, displayName, email]);
@@ -322,7 +322,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     if (req.user.companyId) {
       if (!companyName || !city || !industry || !description || !about) {
         await client.query("ROLLBACK");
-        return res.status(400).json({ message: "????????? ???????? ????????, ?????, ???????, ???????? ? ???? ? ????????." });
+        return res.status(400).json({ message: "Заполните название компании, город, отрасль, описание и блок О компании." });
       }
 
       await client.query(
@@ -337,7 +337,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     res.json({ ok: true, user: refreshed });
   } catch (error) {
     await client.query("ROLLBACK");
-    res.status(500).json({ message: "?? ??????? ???????? ?????? ???????.", error: error.message });
+    res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
   } finally {
     client.release();
   }
@@ -673,7 +673,7 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
 
     const currentStatus = normalizeLifecycleStatus(chat.lifecycleStatus);
     if (nextStatus === currentStatus && !chat.pendingStatus) {
-      return res.json({ ok: true, lifecycleStatus: normalizeLifecycleStatus(chat.lifecycleStatus), isArchived: chat.isArchived, pendingStatus: null });
+      return res.json({ ok: true, lifecycleStatus: currentStatus, isArchived: chat.isArchived, pendingStatus: null });
     }
 
     await pool.query(
@@ -689,7 +689,6 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "?? ??????? ????????? ?????? ?? ????? ???????.", error: error.message });
   }
 });
-
 app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);

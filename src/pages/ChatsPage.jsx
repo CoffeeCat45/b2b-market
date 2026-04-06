@@ -310,6 +310,43 @@ function ChatsPage() {
 
   const requestStatusChange = async (nextStatus) => {
     if (!selectedChat || !user?.companyId || statusBusy) return;
+
+    if (nextStatus === "archived") {
+      if (baseStatusValue !== "closed") {
+        setError("????????? ??? ? ????? ????? ?????? ????? ??????? ???????.");
+        return;
+      }
+
+      try {
+        setStatusBusy(true);
+        setDetailsStatus("");
+        await apiFetch(`/chats/${selectedChat.id}/archive`, {
+          method: "PUT",
+          body: JSON.stringify({ isArchived: true }),
+        });
+        setSidebarMode("archived");
+        setDetailsStatus("??? ????????? ? ??? ?????.");
+        await loadChats();
+      } catch (statusError) {
+        setError(statusError.message);
+      } finally {
+        setStatusBusy(false);
+      }
+      return;
+    }
+
+    if (selectedChat.isArchived) {
+      try {
+        await apiFetch(`/chats/${selectedChat.id}/archive`, {
+          method: "PUT",
+          body: JSON.stringify({ isArchived: false }),
+        });
+      } catch (statusError) {
+        setError(statusError.message);
+        return;
+      }
+    }
+
     if (nextStatus === baseStatusValue && !selectedChat.pendingStatus) return;
 
     try {
@@ -319,7 +356,7 @@ function ChatsPage() {
         method: "PUT",
         body: JSON.stringify({ status: nextStatus }),
       });
-      setDetailsStatus(`Запрос на статус "${CHAT_STATUS_LABELS[nextStatus]}" отправлен.`);
+      setDetailsStatus(`?????? ?? ?????? "${CHAT_STATUS_LABELS[nextStatus]}" ?????????.`);
       await loadChats();
     } catch (statusError) {
       setError(statusError.message);
@@ -327,7 +364,6 @@ function ChatsPage() {
       setStatusBusy(false);
     }
   };
-
   const respondToStatusRequest = async (accepted) => {
     if (!selectedChat || !selectedChat.pendingStatus || statusBusy) return;
 
