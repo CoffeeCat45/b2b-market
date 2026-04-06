@@ -20,10 +20,17 @@ function formatReviewDate(value) {
   }).format(date);
 }
 
+function renderStars(rating) {
+  const normalized = Number(rating) || 0;
+  const fullStars = Math.max(0, Math.min(5, Math.round(normalized)));
+  return `${"★".repeat(fullStars)}${"☆".repeat(5 - fullStars)}`;
+}
+
 function CompanyPage() {
   const { id } = useParams();
   const [activeTab, setActiveTab] = useState("about");
   const [reviewText, setReviewText] = useState("");
+  const [reviewRating, setReviewRating] = useState(5);
   const [reviewStatus, setReviewStatus] = useState("");
   const [reviewError, setReviewError] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
@@ -35,6 +42,7 @@ function CompanyPage() {
   const contactHref = user ? contactPath : `/login?next=${encodeURIComponent(contactPath)}`;
   const canLeaveReview = Boolean(user?.companyId) && user.companyId !== id;
   const reviews = Array.isArray(company?.reviews) ? company.reviews : [];
+  const canViewCompanyData = Boolean(user);
 
   const submitReview = async (event) => {
     event.preventDefault();
@@ -53,9 +61,10 @@ function CompanyPage() {
       setReviewStatus("");
       await apiFetch(`/companies/${company.id}/reviews`, {
         method: "POST",
-        body: JSON.stringify({ text: normalized }),
+        body: JSON.stringify({ text: normalized, rating: reviewRating }),
       });
       setReviewText("");
+      setReviewRating(5);
       setReviewStatus("Отзыв опубликован.");
       await reload();
     } catch (error) {
@@ -107,6 +116,7 @@ function CompanyPage() {
               { key: "about", label: "О компании" },
               { key: "listings", label: "Объявления" },
               { key: "reviews", label: "Отзывы" },
+              { key: "data", label: "Данные" },
             ]}
             activeKey={activeTab}
             onChange={setActiveTab}
@@ -131,6 +141,22 @@ function CompanyPage() {
               <h2>Отзывы</h2>
               {canLeaveReview ? (
                 <form className="review-form" onSubmit={submitReview}>
+                  <div className="field">
+                    <span>Оценка</span>
+                    <div className="review-rating-picker" role="radiogroup" aria-label="Оценка компании">
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={value <= reviewRating ? "review-star-button active" : "review-star-button"}
+                          onClick={() => setReviewRating(value)}
+                          aria-label={`Поставить ${value} ${value === 1 ? "звезду" : value < 5 ? "звезды" : "звёзд"}`}
+                        >
+                          ★
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="field">
                     <span>Оставить отзыв</span>
                     <textarea
@@ -162,11 +188,58 @@ function CompanyPage() {
                       )}
                       {review.createdAt ? <span className="review-date">{formatReviewDate(review.createdAt)}</span> : null}
                     </div>
+                    <div className="review-rating-line">
+                      <span className="review-stars">{renderStars(review.rating)}</span>
+                      <span className="review-rating-value">{Number(review.rating || 0).toFixed(1)}</span>
+                    </div>
                     {review.author && review.authorCompanyName && review.author !== review.authorCompanyName ? <p className="review-subtitle">Контакт: {review.author}</p> : null}
                     <p>{review.text}</p>
                   </article>
                 )) : <p className="review-note">Пока нет отзывов.</p>}
               </div>
+            </section>
+          ) : null}
+          {activeTab === "data" ? (
+            <section className="tab-panel card">
+              <h2>Данные компании</h2>
+              {canViewCompanyData ? (
+                <div className="info-grid company-data-grid">
+                  <div>
+                    <span>Контактное лицо</span>
+                    <strong>{company.contactName || "Не указано"}</strong>
+                  </div>
+                  <div>
+                    <span>Email</span>
+                    <strong>{company.contactEmail || "Не указано"}</strong>
+                  </div>
+                  <div>
+                    <span>Телефон</span>
+                    <strong>{company.phone || "Не указано"}</strong>
+                  </div>
+                  <div>
+                    <span>Город</span>
+                    <strong>{company.city}</strong>
+                  </div>
+                  <div>
+                    <span>Отрасль</span>
+                    <strong>{company.industry}</strong>
+                  </div>
+                  <div className="company-data-wide">
+                    <span>Теги</span>
+                    <strong>{company.specializations.join(" · ") || "Не указано"}</strong>
+                  </div>
+                  <div className="company-data-wide">
+                    <span>Описание компании</span>
+                    <strong>{company.description || "Не указано"}</strong>
+                  </div>
+                  <div className="company-data-wide">
+                    <span>О компании</span>
+                    <strong>{company.about || "Не указано"}</strong>
+                  </div>
+                </div>
+              ) : (
+                <p className="review-note">Войдите в аккаунт компании, чтобы посмотреть контакты и полные данные.</p>
+              )}
             </section>
           ) : null}
         </div>

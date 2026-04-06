@@ -632,6 +632,46 @@ main {
   font-size: 0.92rem;
 }
 
+.review-rating-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.review-star-button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: #b8c3d6;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.review-star-button.active {
+  color: #f4b400;
+  border-color: rgba(244, 180, 0, 0.4);
+  background: #fff8dc;
+}
+
+.review-rating-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.review-stars {
+  color: #f4b400;
+  letter-spacing: 0.08em;
+}
+
+.review-rating-value {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .empty-state {
   text-align: center;
   padding: 42px 24px;
@@ -682,6 +722,14 @@ main {
 .info-grid div {
   display: grid;
   gap: 6px;
+}
+
+.company-data-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.company-data-wide {
+  grid-column: 1 / -1;
 }
 
 .review-card {
@@ -1564,6 +1612,7 @@ main {
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow-y: auto;
   background: rgba(10, 18, 32, 0.42);
 }
 
@@ -1571,6 +1620,8 @@ main {
   width: min(560px, 100%);
   display: grid;
   gap: 16px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 .modal-form-grid {

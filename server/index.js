@@ -678,56 +678,97 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
 app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
   try {
     if (!req.user.companyId) {
-      return res.status(403).json({ message: "?????? ???????? ????? ???????? ?????." });
+      return res.status(403).json({ message: "Только компания может оставить отзыв." });
     }
 
     if (req.user.companyId === req.params.id) {
-      return res.status(400).json({ message: "?????? ???????? ????? ? ????? ????????." });
+      return res.status(400).json({ message: "Нельзя оставить отзыв о своей компании." });
     }
 
     const textValue = String(req.body.text || "").trim();
+    const ratingValue = Number(req.body.rating);
+
     if (!textValue) {
-      return res.status(400).json({ message: "??????? ????? ??????." });
+      return res.status(400).json({ message: "Введите текст отзыва." });
+    }
+
+    if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
+      return res.status(400).json({ message: "Укажите оценку от 1 до 5 звёзд." });
     }
 
     const companyResult = await pool.query("SELECT reviews FROM companies WHERE id = $1", [req.params.id]);
     const company = companyResult.rows[0];
     if (!company) {
-      return res.status(404).json({ message: "??????? ???????? ?? ??????." });
+      return res.status(404).json({ message: "Профиль компании не найден." });
     }
 
     const nextReview = {
       id: "rev-" + crypto.randomUUID(),
-      author: req.user.displayName || req.user.company || "????????????",
+      author: req.user.displayName || req.user.company || "Пользователь",
       authorCompanyId: req.user.companyId,
       authorCompanyName: req.user.company || "",
+      rating: ratingValue,
       text: textValue,
       createdAt: new Date().toISOString(),
     };
 
     const currentReviews = Array.isArray(company.reviews) ? company.reviews : [];
     const nextReviews = [nextReview, ...currentReviews];
+    const ratingSource = nextReviews
+      .map((review) => Number(review?.rating))
+      .filter((value) => Number.isFinite(value) && value >= 1 && value <= 5);
+    const nextRating = ratingSource.length
+      ? Number((ratingSource.reduce((sum, value) => sum + value, 0) / ratingSource.length).toFixed(1))
+      : 0;
 
     await pool.query(
-      "UPDATE companies SET reviews = $2::jsonb WHERE id = $1",
-      [req.params.id, JSON.stringify(nextReviews)],
+      "UPDATE companies SET reviews = $2::jsonb, rating = $3 WHERE id = $1",
+      [req.params.id, JSON.stringify(nextReviews), nextRating],
     );
 
-    res.status(201).json({ ok: true, review: nextReview });
+    res.status(201).json({ ok: true, review: nextReview, rating: nextRating });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ????????? ?????.", error: error.message });
+    res.status(500).json({ message: "Не удалось сохранить отзыв.", error: error.message });
   }
 });
-
-app.get("/api/companies", async (_req, res) => {
+app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(`SELECT id, name, city, phone, industry, rating, description, about, specializations, reviews FROM companies ORDER BY id ASC`);
+    const result = await pool.query(
+      `SELECT c.id,
+              c.name,
+              c.city,
+              c.phone,
+              c.industry,
+              COALESCE(
+                (
+                  SELECT ROUND(AVG((review->>'rating')::numeric), 1)
+                  FROM jsonb_array_elements(COALESCE(c.reviews, '[]'::jsonb)) review
+                  WHERE jsonb_typeof(review) = 'object' AND review ? 'rating'
+                ),
+                c.rating
+              ) AS rating,
+              c.description,
+              c.about,
+              c.specializations,
+              c.reviews,
+              CASE WHEN $1 THEN cu.display_name ELSE NULL END AS "contactName",
+              CASE WHEN $1 THEN cu.email ELSE NULL END AS "contactEmail"
+       FROM companies c
+       LEFT JOIN LATERAL (
+         SELECT u.display_name, u.email
+         FROM users u
+         WHERE u.company_id = c.id AND u.role = 'company'
+         ORDER BY u.id ASC
+         LIMIT 1
+       ) cu ON TRUE
+       ORDER BY c.id ASC`,
+      [Boolean(req.user)],
+    );
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ message: "Не удалось получить список компаний.", error: error.message });
   }
 });
-
 app.get("/api/suppliers", async (_req, res) => {
   try {
     const result = await pool.query(
@@ -743,5 +784,7 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
+
 
 

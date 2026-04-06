@@ -26,7 +26,7 @@ function Header() {
             <>
               <span className="header-user">{user.role === "admin" ? "Админ" : user.company || user.displayName}</span>
               <Link to="/create" className="button button-primary">
-                Управлять
+                Кабинет
               </Link>
               <button type="button" className="button button-secondary" onClick={logout}>
                 Выйти
