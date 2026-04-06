@@ -49,12 +49,13 @@ function getLastMessagePreview(chat) {
 }
 
 function getChatBaseStatus(chat) {
-  if (!chat) return "active";
-  return chat.lifecycleStatus || "active";
+  if (!chat) return "negotiation";
+  const rawStatus = chat.lifecycleStatus || "active";
+  return rawStatus === "active" ? "negotiation" : rawStatus;
 }
 
 function getChatStatusValue(chat) {
-  if (!chat) return "active";
+  if (!chat) return "negotiation";
   if (chat.isArchived) return "archived";
   return getChatBaseStatus(chat);
 }
@@ -309,7 +310,7 @@ function ChatsPage() {
 
   const requestStatusChange = async (nextStatus) => {
     if (!selectedChat || !user?.companyId || statusBusy) return;
-    if (nextStatus === currentStatusValue && !selectedChat.pendingStatus) return;
+    if (nextStatus === baseStatusValue && !selectedChat.pendingStatus) return;
 
     try {
       setStatusBusy(true);

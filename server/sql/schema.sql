@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS chat_reads (
 );
 
 ALTER TABLE chats
-  ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'active';
+  ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'negotiation';
 
 ALTER TABLE chats
   ADD COLUMN IF NOT EXISTS pending_status TEXT;
@@ -137,3 +137,10 @@ CREATE TABLE IF NOT EXISTS chat_archives (
   archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (chat_id, company_id)
 );
+
+ALTER TABLE chats
+  ALTER COLUMN lifecycle_status SET DEFAULT 'negotiation';
+
+UPDATE chats
+SET lifecycle_status = 'negotiation'
+WHERE lifecycle_status = 'active';

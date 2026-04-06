@@ -612,7 +612,7 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
     const isArchived = Boolean(req.body.isArchived);
 
     if (isArchived) {
-      if ((chat.lifecycleStatus || "active") !== "closed") {
+      if (normalizeLifecycleStatus(chat.lifecycleStatus) !== "closed") {
         return res.status(400).json({ message: "????????? ??? ? ????? ????? ?????? ????? ??????? ???????." });
       }
 
@@ -666,14 +666,14 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
     if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ?????? ?????? ???????????." });
 
     const nextStatus = String(req.body.status || "").trim();
-    const allowedStatuses = ["active", "negotiation", "closed"];
+    const allowedStatuses = ["negotiation", "closed"];
     if (!allowedStatuses.includes(nextStatus)) {
       return res.status(400).json({ message: "???????????? ?????? ???????????." });
     }
 
-    const currentStatus = chat.lifecycleStatus || "active";
+    const currentStatus = normalizeLifecycleStatus(chat.lifecycleStatus);
     if (nextStatus === currentStatus && !chat.pendingStatus) {
-      return res.json({ ok: true, lifecycleStatus: chat.lifecycleStatus || "active", isArchived: chat.isArchived, pendingStatus: null });
+      return res.json({ ok: true, lifecycleStatus: normalizeLifecycleStatus(chat.lifecycleStatus), isArchived: chat.isArchived, pendingStatus: null });
     }
 
     await pool.query(
@@ -703,7 +703,7 @@ app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, re
     const accepted = Boolean(req.body.accepted);
 
     if (accepted) {
-      const nextLifecycleStatus = chat.pendingStatus;
+      const nextLifecycleStatus = normalizeLifecycleStatus(chat.pendingStatus);
 
       await pool.query(
         `UPDATE chats
