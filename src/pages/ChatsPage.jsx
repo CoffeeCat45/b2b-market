@@ -499,19 +499,6 @@ function ChatsPage() {
                       <Link to={`/listing/${selectedChat.orderId}`} className="chat-order-link">Перейти в объявление</Link>
                     </div>
                   ) : null}
-                  {incomingStatusRequest ? (
-                    <div className="chat-status-request-banner">
-                      <p>{selectedChat.otherCompanyName} хочет сменить статус на {CHAT_STATUS_LABELS[selectedChat.pendingStatus]}.</p>
-                      <div className="chat-status-request-actions">
-                        <button type="button" className="button button-primary" onClick={() => respondToStatusRequest(true)} disabled={statusBusy}>Принять</button>
-                        <button type="button" className="button button-secondary" onClick={() => respondToStatusRequest(false)} disabled={statusBusy}>Отклонить</button>
-                      </div>
-                    </div>
-                  ) : outgoingStatusRequest ? (
-                    <div className="chat-status-request-banner pending">
-                      <p>Запрос на статус {CHAT_STATUS_LABELS[selectedChat.pendingStatus]} отправлен. Ждём подтверждения второй стороны.</p>
-                    </div>
-                  ) : null}
                   <div className="chat-window-messages">
                     {selectedChat.messages.map((message, index) => (
                       <div key={message.id} className="chat-message-group">
@@ -532,6 +519,19 @@ function ChatsPage() {
                       </div>
                     ))}
                   </div>
+                  {incomingStatusRequest ? (
+                    <div className="chat-status-request-banner">
+                      <p>{selectedChat.otherCompanyName} хочет сменить статус на {CHAT_STATUS_LABELS[selectedChat.pendingStatus]}.</p>
+                      <div className="chat-status-request-actions">
+                        <button type="button" className="button button-primary" onClick={() => respondToStatusRequest(true)} disabled={statusBusy}>Принять</button>
+                        <button type="button" className="button button-secondary" onClick={() => respondToStatusRequest(false)} disabled={statusBusy}>Отклонить</button>
+                      </div>
+                    </div>
+                  ) : outgoingStatusRequest ? (
+                    <div className="chat-status-request-banner pending">
+                      <p>Запрос на статус {CHAT_STATUS_LABELS[selectedChat.pendingStatus]} отправлен. Ждём подтверждения второй стороны.</p>
+                    </div>
+                  ) : null}
                   <div className="chat-compose-panel">
                     {pendingFiles.length ? (
                       <div className="pending-files-row">

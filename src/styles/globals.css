@@ -1796,3 +1796,25 @@ main {
     width: 100%;
   }
 }
+
+.chat-status-request-banner {
+  align-self: start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+
+.chat-status-request-banner p {
+  font-size: 0.96rem;
+  line-height: 1.4;
+}
+
+.chat-status-request-actions {
+  justify-content: flex-start;
+}
+
+.chat-status-request-actions .button {
+  min-width: 132px;
+  min-height: 44px;
+  padding: 0 18px;
+}
