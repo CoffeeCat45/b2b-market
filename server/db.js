@@ -1,4 +1,4 @@
-﻿import path from "path";
+import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pg from "pg";
@@ -7,6 +7,7 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Бэкенд всегда читает секреты из server/.env, чтобы фронтендовые env-файлы не влияли на API-процесс.
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const rawConnectionString = process.env.DATABASE_URL?.trim();
@@ -14,7 +15,7 @@ const poolMaxFromEnv = Number(process.env.PGPOOLMAX || "");
 
 function shouldUseSsl(url) {
   if (!url) return false;
-  return /sslmode=require/i.test(url) || !/(localhost|127\.0\.0\.1)/i.test(url);
+  return /sslmode=require/i.test(url) || !/(localhost|127.0.0.1)/i.test(url);
 }
 
 function normalizeConnectionString(url) {
@@ -27,12 +28,12 @@ function shouldUseManagedPoolDefaults(url) {
   return /(pooler|pgbouncer|6543)/i.test(url);
 }
 
+// У managed pooler-ов обычно низкие лимиты соединений, поэтому по умолчанию держим pool консервативным.
 function resolvePoolMax(url) {
   if (Number.isFinite(poolMaxFromEnv) && poolMaxFromEnv > 0) {
     return poolMaxFromEnv;
   }
 
-  // Managed poolers often expose very low session-mode limits.
   return shouldUseManagedPoolDefaults(url) ? 1 : 10;
 }
 
@@ -68,3 +69,4 @@ export async function testConnection() {
     client.release();
   }
 }
+

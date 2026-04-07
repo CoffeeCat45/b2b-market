@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 export function useMarketplaceData() {
@@ -8,6 +8,7 @@ export function useMarketplaceData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Заказы, поставщики и компании грузятся вместе, потому что большинство экранов каталога завязаны на все три сущности.
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -35,3 +36,4 @@ export function useMarketplaceData() {
 
   return { orders, suppliers, companies, loading, error, reload: load };
 }
+

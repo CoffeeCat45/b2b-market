@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 const AuthContext = createContext(null);
@@ -7,6 +7,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Восстанавливаем активную сессию при старте приложения, чтобы protected-маршруты рендерились предсказуемо.
   useEffect(() => {
     const token = localStorage.getItem("auth_token");
 
@@ -46,6 +47,7 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  // Даёт экранам профиля обновлять текущего пользователя локально после ответа бэкенда без лишнего auth/me.
   const updateUser = (nextUser) => {
     setUser((current) => (typeof nextUser === "function" ? nextUser(current) : nextUser));
   };
@@ -70,3 +72,4 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
+

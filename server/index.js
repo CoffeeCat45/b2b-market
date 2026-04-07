@@ -1,4 +1,4 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
@@ -6,6 +6,8 @@ import { pool, testConnection } from "./db.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+
+// Хеширование паролей остаётся настраиваемым, но при плохом env всё равно откатывается к безопасному дефолту.
 const parsedPasswordSaltRounds = Number.parseInt(process.env.BCRYPT_SALT_ROUNDS || "10", 10);
 const PASSWORD_SALT_ROUNDS =
   Number.isFinite(parsedPasswordSaltRounds) && parsedPasswordSaltRounds >= 8 && parsedPasswordSaltRounds <= 15
@@ -18,6 +20,7 @@ app.use(express.json({ limit: "15mb" }));
 const CITY_OPTIONS = ["Екатеринбург", "Москва", "Казань", "Челябинск", "Тюмень", "Самара", "Санкт-Петербург", "Новосибирск", "Пермь", "Уфа"];
 const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
+// Хелперы сессий и авторизации.
 async function getUserByToken(token) {
   if (!token) return null;
   const result = await pool.query(
@@ -65,6 +68,7 @@ function optionalAuthMiddleware(req, _res, next) {
     });
 }
 
+// Общие payload-mapperы помогают держать frontend и backend в одной валидационной логике.
 function composeLocation(cityMajor, locationDetail) {
   return locationDetail ? `${cityMajor}, ${locationDetail}` : cityMajor;
 }
@@ -146,6 +150,8 @@ function normalizeLifecycleStatus(status) {
   return "negotiation";
 }
 
+// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.
+// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.
 async function getChatForUser(chatId, user) {
   const result = await pool.query(
     `SELECT id, company_a_id AS "companyAId", company_b_id AS "companyBId", CASE WHEN $3 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = chats.id AND archive_state.company_id = $3) END AS "isArchived", lifecycle_status AS "lifecycleStatus", pending_status AS "pendingStatus", pending_status_requested_by_company_id AS "pendingStatusRequestedByCompanyId"
@@ -156,6 +162,7 @@ async function getChatForUser(chatId, user) {
   return result.rows[0] ?? null;
 }
 
+// Сервисные и auth-маршруты.
 app.get("/api/health", async (_req, res) => {
   try {
     const dbOk = await testConnection();
@@ -181,15 +188,15 @@ app.post("/api/auth/register", async (req, res) => {
     const password = String(req.body.password || "");
 
     if (!companyName || !displayName || !city || !industry || !email || !password) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Заполните название компании, контактное имя, город, сферу, email и пароль." });
     }
 
     if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Укажите корректный email." });
     }
 
     if (password.length < 6) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Пароль должен быть не короче 6 символов." });
     }
 
     await client.query("BEGIN");
@@ -317,11 +324,11 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
       : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
 
     if (!displayName) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Укажите контактное имя." });
     }
 
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Укажите корректный email." });
     }
 
     const userResult = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
@@ -345,7 +352,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     if (req.user.companyId) {
       if (!companyName || !city || !industry || !description || !about) {
         await client.query("ROLLBACK");
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+        return res.status(400).json({ message: "Заполните название компании, город, отрасль, описание и блок О компании." });
       }
 
       await client.query(
@@ -374,6 +381,7 @@ app.post("/api/auth/logout", authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Объявления и управление каталогом.
 app.get("/api/orders", async (_req, res) => {
   try {
     const result = await pool.query(
@@ -470,6 +478,7 @@ app.post("/api/orders/:id/view", optionalAuthMiddleware, async (req, res) => {
   }
 });
 
+// Сценарий переговоров с chat-first логикой.
 app.post("/api/chats/open", authMiddleware, async (req, res) => {
   try {
     if (!req.user.companyId) {
@@ -818,6 +827,7 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Не удалось отправить сообщение.", error: error.message });
   }
 });
+// Каталог компаний и social proof.
 app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
   try {
     if (!req.user.companyId) {
@@ -928,6 +938,10 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
+
+
+
 
 
 

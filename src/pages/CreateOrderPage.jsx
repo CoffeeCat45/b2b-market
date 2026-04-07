@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -23,6 +23,7 @@ function CreateOrderPage() {
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
+  // Синхронизируем форму либо из редактируемого объявления, либо из дефолтов текущей компании.
   useEffect(() => {
     if (!user) return;
 
@@ -46,6 +47,7 @@ function CreateOrderPage() {
     setForm({ ...emptyForm, companyId: user.role === "admin" ? "" : user.companyId || "" });
   }, [editingOrder, user]);
 
+  // Один submit-обработчик покрывает и создание, и редактирование, чтобы payload в API оставался единым.
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
@@ -129,3 +131,4 @@ function CreateOrderPage() {
 }
 
 export default CreateOrderPage;
+

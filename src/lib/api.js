@@ -1,4 +1,5 @@
-﻿const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api").replace(/\/$/, "");
+// Общий helper для API держит в одном месте auth-заголовки и форматирование ошибок бэкенда.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api").replace(/\/$/, "");
 
 export async function apiFetch(path, options = {}) {
   const token = localStorage.getItem("auth_token");
@@ -19,10 +20,11 @@ export async function apiFetch(path, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const message = String(data.message || "?????? ???????.");
+    const message = String(data.message || "Ошибка запроса.");
     const details = String(data.error || "").trim();
     throw new Error(details ? `${message} ${details}` : message);
   }
 
   return data;
 }
+

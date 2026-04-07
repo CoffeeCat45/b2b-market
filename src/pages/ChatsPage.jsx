@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -59,6 +59,7 @@ function getChatStatusValue(chat) {
   return getChatBaseStatus(chat);
 }
 
+// В HashRouter query params живут внутри hash, поэтому для deep-link переходов в чат нужен fallback-парсер.
 function getIntentParam(searchParams, key) {
   const directValue = searchParams.get(key);
   if (directValue) return directValue;
@@ -134,6 +135,7 @@ function ChatsPage() {
     return () => mediaQuery.removeEventListener("change", updateLayout);
   }, []);
 
+  // Список чатов — это source of truth для сайдбара, выбранного диалога и панели условий.
   const loadChats = useCallback(async () => {
     try {
       const chatData = await apiFetch("/chats");
@@ -184,6 +186,7 @@ function ChatsPage() {
     setMobileView((current) => (current === "list" ? "chat" : current));
   }, [isMobileLayout, selectedChatId]);
 
+  // При открытии чата из заказа или профиля компании сначала создаём или находим диалог, а потом выбираем его в списке.
   useEffect(() => {
     const chatCompany = getIntentParam(searchParams, "chatCompany");
     const orderId = getIntentParam(searchParams, "orderId");
@@ -227,6 +230,7 @@ function ChatsPage() {
     };
   }, [searchParams, user, loadChats, setSearchParams]);
 
+  // На desktop показываем три панели сразу, а на телефоне переключаемся между списком, чатом и экраном условий.
   const filteredChats = useMemo(
     () => chats.filter((chat) => (sidebarMode === "archived" ? chat.isArchived : !chat.isArchived)),
     [chats, sidebarMode],
@@ -813,6 +817,7 @@ function ChatsPage() {
 }
 
 export default ChatsPage;
+
 
 
 

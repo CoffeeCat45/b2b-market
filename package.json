@@ -6,10 +6,8 @@
   "scripts": {
     "dev": "vite",
     "server": "node server/index.js",
-    "dev:full": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "gh-pages -d dist --no-history"
+    "preview": "vite preview"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

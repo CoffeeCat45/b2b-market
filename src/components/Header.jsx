@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -18,6 +18,7 @@ function Header() {
   const toggleButtonRef = useRef(null);
   const wasOpenRef = useRef(false);
 
+  // Мобильное меню живёт отдельно от desktop-шапки и после закрытия возвращает фокус на кнопку-бургер.
   useEffect(() => {
     document.body.classList.toggle("mobile-menu-open", mobileMenuOpen);
 
@@ -88,6 +89,7 @@ function Header() {
         </div>
       </div>
 
+      {/* На телефоне навигация открывается полноэкранным drawer, чтобы не ломать desktop-раскладку. */}
       {mobileMenuOpen ? (
         <>
           <div className="mobile-sidebar-backdrop open" onClick={closeMobileMenu} />

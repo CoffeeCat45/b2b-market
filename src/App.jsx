@@ -1,4 +1,4 @@
-﻿import { Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import OrdersPage from "./pages/OrdersPage";
 import SuppliersPage from "./pages/SuppliersPage";
@@ -11,6 +11,7 @@ import LoginPage from "./pages/LoginPage";
 
 function App() {
   return (
+    // Карта маршрутов остаётся плоской, чтобы HashRouter без сюрпризов работал на GitHub Pages.
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/orders" element={<OrdersPage />} />
@@ -26,3 +27,4 @@ function App() {
 }
 
 export default App;
+

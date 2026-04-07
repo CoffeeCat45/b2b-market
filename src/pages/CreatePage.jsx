@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Navigate, Link, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +30,7 @@ function CreatePage() {
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
 
+  // Старые chat query params перенаправляем в отдельный workspace чатов.
   const chatCompany = searchParams.get("chatCompany");
   const orderId = searchParams.get("orderId");
   if (chatCompany) {
@@ -55,6 +56,7 @@ function CreatePage() {
 
   const updateProfileField = (field, value) => setProfileForm((current) => ({ ...current, [field]: value }));
 
+  // Модалка профиля разбита на просмотр -> подтверждение пароля -> редактирование, чтобы не менять данные случайно.
   const openProfileModal = () => {
     setProfileModalOpen(true);
     setProfileStep("view");
@@ -137,6 +139,7 @@ function CreatePage() {
     }
   };
 
+  // Управление объявлениями остаётся в кабинете, а создание и редактирование вынесены на отдельную страницу.
   const removeOrder = async (id) => {
     try {
       await apiFetch(`/orders/${id}`, { method: "DELETE" });
@@ -308,3 +311,4 @@ function CreatePage() {
 }
 
 export default CreatePage;
+

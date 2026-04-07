@@ -569,8 +569,8 @@ main {
 }
 
 .sticky-card {
-  position: sticky;
-  top: 108px;
+  position: static;
+  top: auto;
 }
 
 .field {
@@ -1798,6 +1798,33 @@ main {
 
 .chat-details-block {
   align-content: start;
+}
+
+@media (min-width: 821px) {
+  .chat-details-panel {
+    align-content: stretch;
+    grid-template-rows: auto auto minmax(120px, 1fr) auto auto;
+  }
+
+  .chat-details-panel .chat-details-block {
+    min-height: 0;
+  }
+
+  .chat-details-panel .chat-details-preview {
+    min-height: 0;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .chat-details-panel .chat-details-block textarea {
+    min-height: 130px;
+    height: 100%;
+    max-height: 190px;
+  }
+
+  .chat-details-panel .button-primary.button-block {
+    align-self: end;
+  }
 }
 
 .chat-room-time {
