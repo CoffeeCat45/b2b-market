@@ -472,12 +472,20 @@ app.post("/api/orders/:id/view", optionalAuthMiddleware, async (req, res) => {
 
 app.post("/api/chats/open", authMiddleware, async (req, res) => {
   try {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Только компания может открывать чаты." });
+    }
+
     const otherCompanyId = String(req.body.companyId || "").trim();
     const orderId = String(req.body.orderId || "").trim() || null;
 
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+    if (!otherCompanyId) {
+      return res.status(400).json({ message: "Не указана компания для чата." });
+    }
+
+    if (otherCompanyId === req.user.companyId) {
+      return res.status(400).json({ message: "Нельзя открыть чат со своей компанией." });
+    }
 
     let subject = String(req.body.subject || "").trim();
     let orderDetails = null;
@@ -536,10 +544,9 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, chatId });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось удалить чат.", error: error.message });
+    res.status(500).json({ message: "Не удалось открыть чат.", error: error.message });
   }
 });
-
 app.get("/api/chats", authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
@@ -921,6 +928,7 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
 
 
 
