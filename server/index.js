@@ -626,40 +626,6 @@ app.post("/api/chats/:id/read", authMiddleware, async (req, res) => {
   }
 });
 
-app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
-  try {
-    const chat = await getChatForUser(req.params.id, req.user);
-    if (!chat) return res.status(404).json({ message: "Чат не найден." });
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
-
-    const isArchived = Boolean(req.body.isArchived);
-
-    if (isArchived) {
-      if (normalizeLifecycleStatus(chat.lifecycleStatus) !== "closed") {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
-      }
-
-      await pool.query(
-        `INSERT INTO chat_archives (chat_id, company_id, archived_at)
-         VALUES ($1, $2, NOW())
-         ON CONFLICT (chat_id, company_id)
-         DO UPDATE SET archived_at = EXCLUDED.archived_at`,
-        [req.params.id, req.user.companyId],
-      );
-    } else {
-      await pool.query(
-        `DELETE FROM chat_archives
-         WHERE chat_id = $1 AND company_id = $2`,
-        [req.params.id, req.user.companyId],
-      );
-    }
-
-    res.json({ ok: true, isArchived });
-  } catch (error) {
-    res.status(500).json({ message: "Не удалось обновить архив чата.", error: error.message });
-  }
-});
-
 app.delete("/api/chats/:id", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
@@ -697,16 +663,54 @@ app.put("/api/chats/:id/details", authMiddleware, async (req, res) => {
   }
 });
 
+app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
+  try {
+    const chat = await getChatForUser(req.params.id, req.user);
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Только компания может архивировать чат." });
+    }
+
+    const isArchived = Boolean(req.body.isArchived);
+
+    if (isArchived) {
+      if (normalizeLifecycleStatus(chat.lifecycleStatus) !== "closed") {
+        return res.status(400).json({ message: "Перенести чат в архив можно только после статуса Закрыто." });
+      }
+
+      await pool.query(
+        `INSERT INTO chat_archives (chat_id, company_id, archived_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (chat_id, company_id)
+         DO UPDATE SET archived_at = EXCLUDED.archived_at`,
+        [req.params.id, req.user.companyId],
+      );
+    } else {
+      await pool.query(
+        `DELETE FROM chat_archives
+         WHERE chat_id = $1 AND company_id = $2`,
+        [req.params.id, req.user.companyId],
+      );
+    }
+
+    res.json({ ok: true, isArchived });
+  } catch (error) {
+    res.status(500).json({ message: "Не удалось обновить архив чата.", error: error.message });
+  }
+});
+
 app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Только компания может менять статус переговоров." });
+    }
 
     const nextStatus = String(req.body.status || "").trim();
     const allowedStatuses = ["negotiation", "closed"];
     if (!allowedStatuses.includes(nextStatus)) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Некорректный статус переговоров." });
     }
 
     const currentStatus = normalizeLifecycleStatus(chat.lifecycleStatus);
@@ -727,12 +731,17 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Не удалось отправить запрос на смену статуса.", error: error.message });
   }
 });
+
 app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Только компания может подтверждать статус переговоров." });
+    }
+    if (!chat.pendingStatus) {
+      return res.status(400).json({ message: "Нет активного запроса на смену статуса." });
+    }
     if (chat.pendingStatusRequestedByCompanyId === req.user.companyId) {
       return res.status(403).json({ message: "Нельзя подтверждать или отклонять собственный запрос на смену статуса." });
     }
@@ -772,13 +781,15 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Только компания может отправлять сообщения." });
+    }
 
     const text = String(req.body.text || "").trim();
     const attachments = mapAttachments(req.body.attachments);
 
     if (!text && attachments.length === 0) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Добавьте текст сообщения или вложение." });
     }
 
     await pool.query(
@@ -800,7 +811,6 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "Не удалось отправить сообщение.", error: error.message });
   }
 });
-
 app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
   try {
     if (!req.user.companyId) {
@@ -808,18 +818,18 @@ app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
     }
 
     if (req.user.companyId === req.params.id) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(403).json({ message: "О своей компании отзыв оставить нельзя." });
     }
 
     const textValue = String(req.body.text || "").trim();
     const ratingValue = Number(req.body.rating);
 
     if (!textValue) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Введите текст отзыва." });
     }
 
     if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(400).json({ message: "Выберите оценку от 1 до 5." });
     }
 
     const companyResult = await pool.query("SELECT reviews FROM companies WHERE id = $1", [req.params.id]);
@@ -911,6 +921,7 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
 
 
 
