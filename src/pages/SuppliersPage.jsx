@@ -107,7 +107,7 @@ function SuppliersPage() {
                 <span>Сортировка</span>
                 <label className="catalog-sort-control">
                   <span className="visually-hidden">Сортировка поставщиков</span>
-                  <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                  <select name="suppliersSort" value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
                     {SORT_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}

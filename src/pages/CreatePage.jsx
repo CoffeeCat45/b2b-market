@@ -188,6 +188,7 @@ function CreatePage() {
               {user.role === "admin" ? (
                 <div className="admin-search-wrap">
                   <input
+                    name="adminOrderSearch"
                     className="admin-search-input"
                     value={adminSearch}
                     onFocus={() => setAdminSearchFocused(true)}
@@ -271,7 +272,7 @@ function CreatePage() {
               <form onSubmit={verifyProfilePassword} className="modal-form-grid">
                 <label className="field">
                   <span>Пароль</span>
-                  <input type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
+                  <input name="profilePassword" type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
                 </label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
@@ -283,15 +284,15 @@ function CreatePage() {
 
             {profileStep === "edit" ? (
               <form onSubmit={saveProfile} className="modal-form-grid">
-                <label className="field"><span>Контактное имя</span><input value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
-                <label className="field"><span>Email</span><input value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
-                <label className="field"><span>Название компании</span><input value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
-                <label className="field"><span>Город</span><input value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
-                <label className="field"><span>Телефон</span><input value={profileForm.phone} onChange={(event) => updateProfileField("phone", event.target.value)} placeholder="+7 (900) 000-00-00" /></label>
-                <label className="field"><span>Отрасль</span><input value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
-                <label className="field field-wide"><span>Описание компании</span><textarea rows="4" value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
-                <label className="field field-wide"><span>О компании</span><textarea rows="5" value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
-                <label className="field field-wide"><span>Теги</span><input value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
+                <label className="field"><span>Контактное имя</span><input name="profileDisplayName" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
+                <label className="field"><span>Email</span><input name="profileEmail" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
+                <label className="field"><span>Название компании</span><input name="profileCompanyName" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
+                <label className="field"><span>Город</span><input name="profileCity" value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
+                <label className="field"><span>Телефон</span><input name="profilePhone" value={profileForm.phone} onChange={(event) => updateProfileField("phone", event.target.value)} placeholder="+7 (900) 000-00-00" /></label>
+                <label className="field"><span>Отрасль</span><input name="profileIndustry" value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
+                <label className="field field-wide"><span>Описание компании</span><textarea name="profileDescription" rows="4" value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
+                <label className="field field-wide"><span>О компании</span><textarea name="profileAbout" rows="5" value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
+                <label className="field field-wide"><span>Теги</span><input name="profileSpecializations" value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -15,9 +15,20 @@ function MenuIcon() {
 function Header() {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const toggleButtonRef = useRef(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     document.body.classList.toggle("mobile-menu-open", mobileMenuOpen);
+
+    if (wasOpenRef.current && !mobileMenuOpen) {
+      window.requestAnimationFrame(() => {
+        toggleButtonRef.current?.focus();
+      });
+    }
+
+    wasOpenRef.current = mobileMenuOpen;
+
     return () => document.body.classList.remove("mobile-menu-open");
   }, [mobileMenuOpen]);
 
@@ -27,6 +38,7 @@ function Header() {
     <header className="site-header">
       <div className="container header-row">
         <button
+          ref={toggleButtonRef}
           type="button"
           className="mobile-menu-toggle"
           onClick={() => setMobileMenuOpen(true)}
@@ -76,51 +88,55 @@ function Header() {
         </div>
       </div>
 
-      <div className={mobileMenuOpen ? "mobile-sidebar-backdrop open" : "mobile-sidebar-backdrop"} onClick={closeMobileMenu} />
-      <aside className={mobileMenuOpen ? "mobile-sidebar open" : "mobile-sidebar"} aria-hidden={!mobileMenuOpen}>
-        <div className="mobile-sidebar-header">
-          <button type="button" className="mobile-sidebar-close" onClick={closeMobileMenu} aria-label="Закрыть меню">
-            ×
-          </button>
-        </div>
-
-        <Link to="/" className="brand mobile-sidebar-brand" onClick={closeMobileMenu}>
-          <span className="brand-mark">B2B</span>
-          <span className="brand-copy">
-            <strong>Connect</strong>
-            <small>поиск поставщиков и заказов</small>
-          </span>
-        </Link>
-
-        <nav className="mobile-sidebar-nav">
-          <NavLink to="/orders" onClick={closeMobileMenu}>Заказы</NavLink>
-          <NavLink to="/suppliers" onClick={closeMobileMenu}>Поставщики</NavLink>
-          {user ? <NavLink to="/chats" onClick={closeMobileMenu}>Чаты</NavLink> : null}
-        </nav>
-
-        <div className="mobile-sidebar-actions">
-          {user ? (
-            <>
-              <span className="header-user mobile-sidebar-user">{user.role === "admin" ? "Админ" : user.company || user.displayName}</span>
-              <Link to="/create" className="button button-primary" onClick={closeMobileMenu}>
-                Кабинет
-              </Link>
-              <button type="button" className="button button-secondary" onClick={() => { closeMobileMenu(); logout(); }}>
-                Выйти
+      {mobileMenuOpen ? (
+        <>
+          <div className="mobile-sidebar-backdrop open" onClick={closeMobileMenu} />
+          <aside className="mobile-sidebar open">
+            <div className="mobile-sidebar-header">
+              <button type="button" className="mobile-sidebar-close" onClick={closeMobileMenu} aria-label="Закрыть меню">
+                ×
               </button>
-            </>
-          ) : (
-            <>
-              <Link to="/create" className="button button-primary" onClick={closeMobileMenu}>
-                Разместить
-              </Link>
-              <Link to="/login" className="button button-secondary" onClick={closeMobileMenu}>
-                Войти
-              </Link>
-            </>
-          )}
-        </div>
-      </aside>
+            </div>
+
+            <Link to="/" className="brand mobile-sidebar-brand" onClick={closeMobileMenu}>
+              <span className="brand-mark">B2B</span>
+              <span className="brand-copy">
+                <strong>Connect</strong>
+                <small>поиск поставщиков и заказов</small>
+              </span>
+            </Link>
+
+            <nav className="mobile-sidebar-nav">
+              <NavLink to="/orders" onClick={closeMobileMenu}>Заказы</NavLink>
+              <NavLink to="/suppliers" onClick={closeMobileMenu}>Поставщики</NavLink>
+              {user ? <NavLink to="/chats" onClick={closeMobileMenu}>Чаты</NavLink> : null}
+            </nav>
+
+            <div className="mobile-sidebar-actions">
+              {user ? (
+                <>
+                  <span className="header-user mobile-sidebar-user">{user.role === "admin" ? "Админ" : user.company || user.displayName}</span>
+                  <Link to="/create" className="button button-primary" onClick={closeMobileMenu}>
+                    Кабинет
+                  </Link>
+                  <button type="button" className="button button-secondary" onClick={() => { closeMobileMenu(); logout(); }}>
+                    Выйти
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link to="/create" className="button button-primary" onClick={closeMobileMenu}>
+                    Разместить
+                  </Link>
+                  <Link to="/login" className="button button-secondary" onClick={closeMobileMenu}>
+                    Войти
+                  </Link>
+                </>
+              )}
+            </div>
+          </aside>
+        </>
+      ) : null}
     </header>
   );
 }

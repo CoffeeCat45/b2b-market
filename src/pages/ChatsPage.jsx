@@ -539,6 +539,7 @@ function ChatsPage() {
       {user?.companyId ? (
         <select
           className="chat-status-select"
+          name="chatStatus"
           value={currentStatusValue}
           onChange={(event) => requestStatusChange(event.target.value)}
           disabled={statusBusy || Boolean(selectedChat?.pendingStatus)}
@@ -725,8 +726,8 @@ function ChatsPage() {
                       <button type="button" className="attach-button" onClick={() => fileInputRef.current?.click()} title="Прикрепить файл">
                         <FileIcon />
                       </button>
-                      <input ref={fileInputRef} type="file" accept=".pdf,.jpeg,.jpg,.png" multiple hidden onChange={handlePickFiles} />
-                      <textarea ref={messageInputRef} rows="1" value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Напишите сообщение" />
+                      <input name="chatAttachments" ref={fileInputRef} type="file" accept=".pdf,.jpeg,.jpg,.png" multiple hidden onChange={handlePickFiles} />
+                      <textarea name="chatMessage" ref={messageInputRef} rows="1" value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Напишите сообщение" />
                       <button type="button" className="send-button" onClick={sendMessage} title="Отправить сообщение" aria-label="Отправить сообщение">
                         <SendIcon />
                       </button>
@@ -763,7 +764,7 @@ function ChatsPage() {
                   </div>
                   <div className="chat-details-block">
                     <h3>На чём сошлись</h3>
-                    <textarea rows="7" value={agreementDraft} onChange={(event) => setAgreementDraft(event.target.value)} placeholder="Запишите согласованные условия, дедлайны, объёмы и следующий шаг." />
+                    <textarea name="chatAgreementDetails" rows="7" value={agreementDraft} onChange={(event) => setAgreementDraft(event.target.value)} placeholder="Запишите согласованные условия, дедлайны, объёмы и следующий шаг." />
                   </div>
                   {detailsStatus ? <div className="success-banner">{detailsStatus}</div> : null}
                   <button type="button" className="button button-primary button-block" onClick={saveDetails}>Сохранить детали</button>
@@ -790,15 +791,15 @@ function ChatsPage() {
             </div>
             <div className="field">
               <span>Цена</span>
-              <input value={offerForm.price} onChange={(event) => setOfferForm((current) => ({ ...current, price: event.target.value }))} placeholder="Например: от 180 000 ₽" />
+              <input name="offerPrice" value={offerForm.price} onChange={(event) => setOfferForm((current) => ({ ...current, price: event.target.value }))} placeholder="Например: от 180 000 ₽" />
             </div>
             <div className="field">
               <span>Сроки</span>
-              <input value={offerForm.timeline} onChange={(event) => setOfferForm((current) => ({ ...current, timeline: event.target.value }))} placeholder="Например: 14 рабочих дней" />
+              <input name="offerTimeline" value={offerForm.timeline} onChange={(event) => setOfferForm((current) => ({ ...current, timeline: event.target.value }))} placeholder="Например: 14 рабочих дней" />
             </div>
             <div className="field">
               <span>Комментарий</span>
-              <textarea rows="5" value={offerForm.comment} onChange={(event) => setOfferForm((current) => ({ ...current, comment: event.target.value }))} placeholder="Уточните объём, этапы, ограничения или состав поставки." />
+              <textarea name="offerComment" rows="5" value={offerForm.comment} onChange={(event) => setOfferForm((current) => ({ ...current, comment: event.target.value }))} placeholder="Уточните объём, этапы, ограничения или состав поставки." />
             </div>
             <div className="modal-actions">
               <button type="button" className="button button-secondary" onClick={() => setOfferModalOpen(false)}>Отмена</button>

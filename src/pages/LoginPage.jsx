@@ -85,11 +85,11 @@ function LoginPage() {
             <form className="login-form" onSubmit={handleLogin}>
               <label className="field">
                 <span>Email</span>
-                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="northbeans@b2b.local" />
+                <input name="loginEmail" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="northbeans@b2b.local" />
               </label>
               <label className="field">
                 <span>Пароль</span>
-                <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Введите пароль" />
+                <input name="loginPassword" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Введите пароль" />
               </label>
               {error ? <div className="error-banner">{error}</div> : null}
               <button type="submit" className="button button-primary button-block" disabled={loading}>
@@ -100,19 +100,20 @@ function LoginPage() {
             <form className="login-form" onSubmit={handleRegister}>
               <label className="field">
                 <span>Название компании</span>
-                <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder="ООО Северный Поставщик" />
+                <input name="registerCompanyName" value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder="ООО Северный Поставщик" />
               </label>
               <label className="field">
                 <span>Контактное имя</span>
-                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Анна Петрова" />
+                <input name="registerDisplayName" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Анна Петрова" />
               </label>
               <label className="field">
                 <span>Город</span>
-                <input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Екатеринбург" />
+                <input name="registerCity" value={city} onChange={(event) => setCity(event.target.value)} placeholder="Екатеринбург" />
               </label>
               <label className="field">
                 <span>Сфера</span>
                 <input
+                  name="registerIndustry"
                   list="industry-options"
                   value={industry}
                   onChange={(event) => setIndustry(event.target.value)}
@@ -126,15 +127,15 @@ function LoginPage() {
               </label>
               <label className="field">
                 <span>Email</span>
-                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="company@example.ru" />
+                <input name="registerEmail" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="company@example.ru" />
               </label>
               <label className="field">
                 <span>Пароль</span>
-                <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 6 символов" />
+                <input name="registerPassword" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 6 символов" />
               </label>
               <label className="field">
                 <span>Повторите пароль</span>
-                <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Повторите пароль" />
+                <input name="registerConfirmPassword" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Повторите пароль" />
               </label>
               {error ? <div className="error-banner">{error}</div> : null}
               <button type="submit" className="button button-primary button-block" disabled={loading}>

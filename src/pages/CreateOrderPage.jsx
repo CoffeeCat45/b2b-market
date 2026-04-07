@@ -98,22 +98,22 @@ function CreateOrderPage() {
               {user.role === "admin" ? (
                 <label className="field field-type">
                   <span>Компания</span>
-                  <select value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}>
+                  <select name="orderCompanyId" value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}>
                     <option value="">Выберите компанию</option>
                     {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
                   </select>
                 </label>
               ) : null}
-              <label className="field"><span>Категория</span><input value={form.category} onChange={(event) => updateField("category", event.target.value)} /></label>
-              <label className="field field-wide"><span>Название</span><input value={form.title} onChange={(event) => updateField("title", event.target.value)} /></label>
-              <label className="field city-field"><span>Город</span><input value={form.cityMajor} onChange={(event) => updateField("cityMajor", event.target.value)} placeholder="Город размещения" />{citySuggestions.length ? <div className="field-suggestions">{citySuggestions.map((city) => <button key={city} type="button" className="search-suggestion" onClick={() => updateField("cityMajor", city)}>{city}</button>)}</div> : null}</label>
-              <label className="field"><span>Район / пригород</span><input value={form.locationDetail} onChange={(event) => updateField("locationDetail", event.target.value)} placeholder="Рыбино или р-н Центральный" /></label>
-              <label className="field"><span>Бюджет от</span><input type="number" value={form.budgetFrom} onChange={(event) => updateField("budgetFrom", event.target.value)} /></label>
-              <label className="field"><span>Бюджет до</span><input type="number" value={form.budgetTo} onChange={(event) => updateField("budgetTo", event.target.value)} /></label>
-              <label className="field field-wide"><span>Краткое описание</span><input value={form.summary} onChange={(event) => updateField("summary", event.target.value)} /></label>
-              <label className="field field-wide"><span>Полное описание</span><textarea rows="6" value={form.description} onChange={(event) => updateField("description", event.target.value)} /></label>
-              <label className="field field-wide"><span>Условия сотрудничества</span><textarea rows="4" value={form.terms} onChange={(event) => updateField("terms", event.target.value)} /></label>
-              <label className="field field-wide"><span>Теги</span><input value={form.tags} onChange={(event) => updateField("tags", event.target.value)} placeholder="B2B, поставка, опт" /></label>
+              <label className="field"><span>Категория</span><input name="orderCategory" value={form.category} onChange={(event) => updateField("category", event.target.value)} /></label>
+              <label className="field field-wide"><span>Название</span><input name="orderTitle" value={form.title} onChange={(event) => updateField("title", event.target.value)} /></label>
+              <label className="field city-field"><span>Город</span><input name="orderCityMajor" value={form.cityMajor} onChange={(event) => updateField("cityMajor", event.target.value)} placeholder="Город размещения" />{citySuggestions.length ? <div className="field-suggestions">{citySuggestions.map((city) => <button key={city} type="button" className="search-suggestion" onClick={() => updateField("cityMajor", city)}>{city}</button>)}</div> : null}</label>
+              <label className="field"><span>Район / пригород</span><input name="orderLocationDetail" value={form.locationDetail} onChange={(event) => updateField("locationDetail", event.target.value)} placeholder="Рыбино или р-н Центральный" /></label>
+              <label className="field"><span>Бюджет от</span><input name="orderBudgetFrom" type="number" value={form.budgetFrom} onChange={(event) => updateField("budgetFrom", event.target.value)} /></label>
+              <label className="field"><span>Бюджет до</span><input name="orderBudgetTo" type="number" value={form.budgetTo} onChange={(event) => updateField("budgetTo", event.target.value)} /></label>
+              <label className="field field-wide"><span>Краткое описание</span><input name="orderSummary" value={form.summary} onChange={(event) => updateField("summary", event.target.value)} /></label>
+              <label className="field field-wide"><span>Полное описание</span><textarea name="orderDescription" rows="6" value={form.description} onChange={(event) => updateField("description", event.target.value)} /></label>
+              <label className="field field-wide"><span>Условия сотрудничества</span><textarea name="orderTerms" rows="4" value={form.terms} onChange={(event) => updateField("terms", event.target.value)} /></label>
+              <label className="field field-wide"><span>Теги</span><input name="orderTags" value={form.tags} onChange={(event) => updateField("tags", event.target.value)} placeholder="B2B, поставка, опт" /></label>
             </div>
             {error ? <div className="error-banner">{error}</div> : null}
             {status ? <div className="success-banner">{status}</div> : null}

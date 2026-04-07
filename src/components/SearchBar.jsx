@@ -34,6 +34,7 @@ function SearchBar({
     <form className={`search-bar ${compact ? "search-bar-compact" : ""}`} onSubmit={onSubmit}>
       <div className="search-input-wrap">
         <input
+          name="searchQuery"
           type="text"
           placeholder="Найти заказ или категорию"
           value={query}
@@ -57,7 +58,7 @@ function SearchBar({
           </div>
         ) : null}
       </div>
-      <select value={type} onChange={(event) => onTypeChange(event.target.value)}>
+      <select name="searchType" value={type} onChange={(event) => onTypeChange(event.target.value)}>
         <option value="orders">Заказы</option>
         <option value="suppliers">Поставщики</option>
       </select>

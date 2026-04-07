@@ -2427,3 +2427,25 @@ main {
     justify-content: center;
   }
 }
+
+@media (min-width: 821px) and (max-width: 1360px) {
+  .chats-workspace {
+    grid-template-columns: 250px minmax(0, 1fr);
+    align-items: start;
+    height: auto;
+    min-height: 0;
+  }
+
+  .chats-sidebar,
+  .chat-center {
+    min-height: 680px;
+    height: auto;
+  }
+
+  .chat-details-panel {
+    grid-column: 1 / -1;
+    min-height: auto;
+    height: auto;
+    overflow: visible;
+  }
+}
