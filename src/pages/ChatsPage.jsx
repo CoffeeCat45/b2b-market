@@ -59,6 +59,15 @@ function getChatStatusValue(chat) {
   return getChatBaseStatus(chat);
 }
 
+function getIntentParam(searchParams, key) {
+  const directValue = searchParams.get(key);
+  if (directValue) return directValue;
+
+  const hash = window.location.hash || "";
+  const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
+  return new URLSearchParams(query).get(key);
+}
+
 function FileIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -91,6 +100,7 @@ function ChatsPage() {
   const [offerModalOpen, setOfferModalOpen] = useState(false);
   const [offerForm, setOfferForm] = useState({ price: "", timeline: "", comment: "" });
   const [contextMenu, setContextMenu] = useState(null);
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
@@ -101,8 +111,10 @@ function ChatsPage() {
       const chatData = await apiFetch("/chats");
       setChats(chatData);
       setError("");
+      return chatData;
     } catch (loadError) {
       setError(loadError.message);
+      return [];
     }
   }, []);
 
@@ -131,8 +143,8 @@ function ChatsPage() {
   }, []);
 
   useEffect(() => {
-    const chatCompany = searchParams.get("chatCompany");
-    const orderId = searchParams.get("orderId");
+    const chatCompany = getIntentParam(searchParams, "chatCompany");
+    const orderId = getIntentParam(searchParams, "orderId");
     if (!user?.companyId || !chatCompany) return undefined;
 
     const openKey = `${user.companyId}:${chatCompany}:${orderId || ""}`;
@@ -152,9 +164,10 @@ function ChatsPage() {
       .then(async (data) => {
         if (cancelled) return;
         setSidebarMode("active");
+        await loadChats();
+        if (cancelled) return;
         setSelectedChatId(data.chatId);
         setSearchParams(data.chatId ? { chatId: data.chatId } : {});
-        await loadChats();
       })
       .catch((openError) => {
         if (!cancelled) {
@@ -192,16 +205,38 @@ function ChatsPage() {
     setOfferModalOpen(false);
     setOfferForm({ price: "", timeline: "", comment: "" });
     setContextMenu(null);
+    setDeleteTargetId(null);
   }, [selectedChatId, selectedChat?.agreementDetails, selectedChat?.offeredDetails]);
 
   useEffect(() => {
+    const chatCompany = getIntentParam(searchParams, "chatCompany");
+    const orderId = getIntentParam(searchParams, "orderId");
+
+    if (chatCompany && chats.length) {
+      const matchedChat = chats.find((chat) => (
+        chat.otherCompanyId === chatCompany && (orderId ? chat.orderId === orderId : true)
+      ));
+
+      if (matchedChat) {
+        if (selectedChatId !== matchedChat.id) {
+          setSelectedChatId(matchedChat.id);
+        }
+        setSidebarMode(matchedChat.isArchived ? "archived" : "active");
+        setSearchParams({ chatId: matchedChat.id });
+        return;
+      }
+    }
+
     if (!selectedChatId) return;
-    const existsInCurrentList = filteredChats.some((chat) => chat.id === selectedChatId);
-    if (!existsInCurrentList) {
+    if (openingChatRef.current || chatCompany) return;
+    if (!chats.length) return;
+
+    const existsInLoadedChats = chats.some((chat) => chat.id === selectedChatId);
+    if (!existsInLoadedChats) {
       setSelectedChatId(null);
       setSearchParams({});
     }
-  }, [filteredChats, selectedChatId, setSearchParams]);
+  }, [chats, selectedChatId, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!selectedChatId || !selectedChat || !selectedChat.unreadCount || !user?.companyId) return;
@@ -287,7 +322,23 @@ function ChatsPage() {
 
   const handleChatContextMenu = (event, chat) => {
     event.preventDefault();
+    setDeleteTargetId(null);
     setContextMenu({ chatId: chat.id, x: event.clientX, y: event.clientY, isArchived: chat.isArchived });
+  };
+
+  const deleteChat = async (chatId) => {
+    try {
+      await apiFetch(`/chats/${chatId}`, { method: "DELETE" });
+      setContextMenu(null);
+      setDeleteTargetId(null);
+      if (selectedChatId === chatId) {
+        setSelectedChatId(null);
+        setSearchParams({});
+      }
+      await loadChats();
+    } catch (deleteError) {
+      setError(deleteError.message);
+    }
   };
 
   const toggleArchive = async (chat, nextArchived) => {
@@ -441,12 +492,6 @@ function ChatsPage() {
     <Layout>
       <section className="chats-page-section">
         <div className="container">
-          <div className="chats-page-header card">
-            <div>
-              <h1>Чаты</h1>
-            </div>
-            {selectedChat ? <button type="button" className="button button-secondary" onClick={clearSelection}>Снять выбор</button> : null}
-          </div>
           {error ? <div className="error-banner">{error}</div> : null}
           <div className="chats-workspace">
             <aside className="chats-sidebar card">

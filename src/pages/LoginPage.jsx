@@ -112,11 +112,17 @@ function LoginPage() {
               </label>
               <label className="field">
                 <span>Сфера</span>
-                <select value={industry} onChange={(event) => setIndustry(event.target.value)}>
+                <input
+                  list="industry-options"
+                  value={industry}
+                  onChange={(event) => setIndustry(event.target.value)}
+                  placeholder="Выберите или укажите свою сферу"
+                />
+                <datalist id="industry-options">
                   {INDUSTRY_OPTIONS.map((item) => (
-                    <option key={item} value={item}>{item}</option>
+                    <option key={item} value={item} />
                   ))}
-                </select>
+                </datalist>
               </label>
               <label className="field">
                 <span>Email</span>
@@ -143,3 +149,4 @@ function LoginPage() {
 }
 
 export default LoginPage;
+

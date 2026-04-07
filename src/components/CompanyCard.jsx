@@ -1,6 +1,8 @@
 ﻿import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 function CompanyCard({ supplier, onTagClick }) {
+  const { user } = useAuth();
   const openCard = () => {
     window.open(`#/company/${supplier.companyId}`, "_blank", "noopener,noreferrer");
   };
@@ -11,6 +13,9 @@ function CompanyCard({ supplier, onTagClick }) {
       openCard();
     }
   };
+
+  const contactPath = `/chats?chatCompany=${encodeURIComponent(supplier.companyId)}`;
+  const contactHref = user ? contactPath : `/login?next=${encodeURIComponent(contactPath)}`;
 
   return (
     <article className="card company-card card-clickable" role="link" tabIndex={0} onClick={openCard} onKeyDown={handleKeyDown}>
@@ -41,7 +46,7 @@ function CompanyCard({ supplier, onTagClick }) {
           ))}
         </div>
         <div className="card-actions">
-          <Link to={`/create?chatCompany=${supplier.companyId}`} className="button button-primary" onClick={(event) => event.stopPropagation()}>Связаться</Link>
+          <Link to={contactHref} className="button button-primary" onClick={(event) => event.stopPropagation()}>Связаться</Link>
         </div>
       </div>
     </article>
