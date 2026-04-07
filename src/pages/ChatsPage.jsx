@@ -85,6 +85,24 @@ function SendIcon() {
   );
 }
 
+function ArrowLeftIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function DetailsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h10" />
+    </svg>
+  );
+}
+
 function ChatsPage() {
   const { user, loading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -102,9 +120,19 @@ function ChatsPage() {
   const [contextMenu, setContextMenu] = useState(null);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(() => window.innerWidth <= 820);
+  const [mobileView, setMobileView] = useState("list");
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
   const openingChatRef = useRef("");
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 820px)");
+    const updateLayout = () => setIsMobileLayout(mediaQuery.matches);
+    updateLayout();
+    mediaQuery.addEventListener("change", updateLayout);
+    return () => mediaQuery.removeEventListener("change", updateLayout);
+  }, []);
 
   const loadChats = useCallback(async () => {
     try {
@@ -141,6 +169,20 @@ function ChatsPage() {
       window.removeEventListener("scroll", closeMenu);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isMobileLayout) {
+      setMobileView("list");
+      return;
+    }
+
+    if (!selectedChatId) {
+      setMobileView("list");
+      return;
+    }
+
+    setMobileView((current) => (current === "list" ? "chat" : current));
+  }, [isMobileLayout, selectedChatId]);
 
   useEffect(() => {
     const chatCompany = getIntentParam(searchParams, "chatCompany");
@@ -285,12 +327,18 @@ function ChatsPage() {
     setContextMenu(null);
     setSelectedChatId(chatId);
     setSearchParams({ chatId });
+    if (isMobileLayout) {
+      setMobileView("chat");
+    }
   };
 
   const clearSelection = () => {
     setContextMenu(null);
     setSelectedChatId(null);
     setSearchParams({});
+    if (isMobileLayout) {
+      setMobileView("list");
+    }
   };
 
   const handlePickFiles = async (event) => {
@@ -485,6 +533,32 @@ function ChatsPage() {
     setOfferForm({ price: "", timeline: "", comment: "" });
   };
 
+  const statusControl = (
+    <div className="chat-status-control">
+      <span className="chat-status-caption">Статус</span>
+      {user?.companyId ? (
+        <select
+          className="chat-status-select"
+          value={currentStatusValue}
+          onChange={(event) => requestStatusChange(event.target.value)}
+          disabled={statusBusy || Boolean(selectedChat?.pendingStatus)}
+        >
+          {CHAT_STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value} disabled={option.value === "archived" && !selectedChat?.isArchived && baseStatusValue !== "closed"}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="chat-status-chip">{CHAT_STATUS_LABELS[currentStatusValue]}</span>
+      )}
+    </div>
+  );
+
+  const showSidebar = !isMobileLayout || mobileView === "list";
+  const showChat = !isMobileLayout || mobileView === "chat";
+  const showDetails = !isMobileLayout || mobileView === "details";
+
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
 
@@ -493,8 +567,8 @@ function ChatsPage() {
       <section className="chats-page-section">
         <div className="container">
           {error ? <div className="error-banner">{error}</div> : null}
-          <div className="chats-workspace">
-            <aside className="chats-sidebar card">
+          <div className={`chats-workspace ${isMobileLayout ? `mobile-view-${mobileView}` : ""}`}>
+            <aside className={showSidebar ? "chats-sidebar card mobile-screen-active" : "chats-sidebar card mobile-screen-hidden"}>
               <div className="chats-sidebar-header">
                 <div>
                   <h2>{sidebarMode === "archived" ? "Архив" : "Диалоги"}</h2>
@@ -575,38 +649,31 @@ function ChatsPage() {
               ) : null}
             </aside>
 
-            <section className="chat-center card">
+            <section className={showChat ? "chat-center card mobile-screen-active" : "chat-center card mobile-screen-hidden"}>
               {selectedChat ? (
                 <>
                   <div className="chat-window-header">
-                    <Link to={selectedChat.otherCompanyId ? `/company/${selectedChat.otherCompanyId}` : "#"} className="chat-window-title chat-window-title-link">
-                      <span className="chat-room-avatar large">{selectedChat.initials || selectedChat.otherCompanyName.slice(0, 2)}</span>
-                      <div>
-                        <strong>{selectedChat.otherCompanyName}</strong>
-                        <span>{selectedChat.contractTitle}</span>
-                      </div>
-                    </Link>
-                    <div className="chat-status-control">
-                      <span className="chat-status-caption">Статус</span>
-                      {user.companyId ? (
-                        <select
-                          className="chat-status-select"
-                          value={currentStatusValue}
-                          onChange={(event) => requestStatusChange(event.target.value)}
-                          disabled={statusBusy || Boolean(selectedChat.pendingStatus)}
-                        >
-                          {CHAT_STATUS_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value} disabled={option.value === "archived" && !selectedChat?.isArchived && baseStatusValue !== "closed"}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="chat-status-chip">{CHAT_STATUS_LABELS[currentStatusValue]}</span>
-                      )}
+                    <div className="chat-window-header-main">
+                      {isMobileLayout ? (
+                        <button type="button" className="chat-mobile-nav-button" onClick={clearSelection} aria-label="Вернуться к диалогам">
+                          <ArrowLeftIcon />
+                        </button>
+                      ) : null}
+                      <Link to={selectedChat.otherCompanyId ? `/company/${selectedChat.otherCompanyId}` : "#"} className="chat-window-title chat-window-title-link">
+                        <span className="chat-room-avatar large">{selectedChat.initials || selectedChat.otherCompanyName.slice(0, 2)}</span>
+                        <div>
+                          <strong>{selectedChat.otherCompanyName}</strong>
+                          <span>{selectedChat.contractTitle}</span>
+                        </div>
+                      </Link>
                     </div>
+                    {isMobileLayout ? (
+                      <button type="button" className="chat-mobile-nav-button" onClick={() => setMobileView("details")} aria-label="Открыть условия">
+                        <DetailsIcon />
+                      </button>
+                    ) : statusControl}
                   </div>
-                  {selectedChat.orderId ? (
+{selectedChat.orderId ? (
                     <div className="chat-order-strip">
                       <Link to={`/listing/${selectedChat.orderId}`} className="chat-order-link">Перейти в объявление</Link>
                     </div>
@@ -674,10 +741,18 @@ function ChatsPage() {
               )}
             </section>
 
-            <aside className="chat-details-panel card">
+            <aside className={showDetails ? "chat-details-panel card mobile-screen-active" : "chat-details-panel card mobile-screen-hidden"}>
               {selectedChat ? (
                 <>
-                  <div className="chat-details-block">
+                  {isMobileLayout ? (
+                    <div className="chat-details-mobile-header">
+                      <button type="button" className="chat-mobile-nav-button" onClick={() => setMobileView("chat")} aria-label="Вернуться в чат">
+                        <ArrowLeftIcon />
+                      </button>
+                      <h2>Условия</h2>
+                      {statusControl}
+                    </div>
+                  ) : null}<div className="chat-details-block">
                     <h3>Что запросили</h3>
                     <div className="chat-details-preview">{formatRequested(selectedChat)}</div>
                   </div>
@@ -737,4 +812,8 @@ function ChatsPage() {
 }
 
 export default ChatsPage;
+
+
+
+
 
