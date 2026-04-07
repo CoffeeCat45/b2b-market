@@ -7,8 +7,12 @@
   description TEXT NOT NULL,
   about TEXT NOT NULL,
   specializations JSONB NOT NULL DEFAULT '[]'::jsonb,
-  reviews JSONB NOT NULL DEFAULT '[]'::jsonb
+  reviews JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,

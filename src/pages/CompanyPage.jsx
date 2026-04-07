@@ -100,6 +100,7 @@ function CompanyPage() {
               <h1>{company.name}</h1>
               <div className="detail-meta">
                 <span>{company.city}</span>
+                {company.createdAt ? <span>На платформе с {company.createdAt}</span> : null}
                 <span>★ {company.rating}</span>
                 <span>{company.specializations.join(" · ")}</span>
               </div>
@@ -220,6 +221,10 @@ function CompanyPage() {
                     <strong>{company.city}</strong>
                   </div>
                   <div>
+                    <span>Дата регистрации</span>
+                    <strong>{company.createdAt || "Не указано"}</strong>
+                  </div>
+                  <div>
                     <span>Отрасль</span>
                     <strong>{company.industry}</strong>
                   </div>
@@ -248,4 +253,5 @@ function CompanyPage() {
 }
 
 export default CompanyPage;
+
 

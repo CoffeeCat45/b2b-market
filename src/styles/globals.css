@@ -1321,6 +1321,26 @@ main {
   background: #f3f7ff;
 }
 
+.chat-context-confirm {
+  padding: 6px 8px 10px;
+  color: var(--navy);
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.chat-context-row {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-context-action-danger {
+  color: #b42318;
+}
+
+.chat-context-action-danger:hover {
+  background: #fff1f0;
+}
+
 .chat-room-avatar {
   width: 52px;
   height: 52px;

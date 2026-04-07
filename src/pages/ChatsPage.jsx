@@ -528,18 +528,49 @@ function ChatsPage() {
               </div>
               {contextMenu ? (
                 <div className="chat-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="chat-context-action"
-                    onClick={() => {
-                      const targetChat = chats.find((chat) => chat.id === contextMenu.chatId);
-                      if (targetChat) {
-                        toggleArchive(targetChat, !contextMenu.isArchived);
-                      }
-                    }}
-                  >
-                    {contextMenu.isArchived ? "Убрать из архива" : "Добавить в архив"}
-                  </button>
+                  {deleteTargetId === contextMenu.chatId ? (
+                    <>
+                      <div className="chat-context-confirm">Удалить чат вместе с перепиской?</div>
+                      <div className="chat-context-row">
+                        <button
+                          type="button"
+                          className="chat-context-action chat-context-action-danger"
+                          onClick={() => deleteChat(contextMenu.chatId)}
+                        >
+                          Удалить
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-context-action"
+                          onClick={() => setDeleteTargetId(null)}
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="chat-context-action"
+                        onClick={() => {
+                          const targetChat = chats.find((chat) => chat.id === contextMenu.chatId);
+                          if (targetChat) {
+                            toggleArchive(targetChat, !contextMenu.isArchived);
+                          }
+                        }}
+                      >
+                        {contextMenu.isArchived ? "Убрать из архива" : "Добавить в архив"}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-context-action chat-context-action-danger"
+                        onClick={() => setDeleteTargetId(contextMenu.chatId)}
+                      >
+                        Удалить чат
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : null}
             </aside>
@@ -706,3 +737,4 @@ function ChatsPage() {
 }
 
 export default ChatsPage;
+

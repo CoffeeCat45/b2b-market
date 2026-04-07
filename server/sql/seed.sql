@@ -92,3 +92,17 @@ VALUES
   ('msg-1','chat-1','cmp-2','Здравствуйте, можем обсудить разработку сайта под ваш каталог.'),
   ('msg-2','chat-1','cmp-1','Да, интересно. Пришлите ориентир по срокам и этапам.');
 
+
+
+UPDATE companies SET created_at = '2025-01-15T09:00:00Z' WHERE id = 'cmp-1';
+UPDATE companies SET created_at = '2025-02-03T10:30:00Z' WHERE id = 'cmp-2';
+UPDATE companies SET created_at = '2025-02-24T08:45:00Z' WHERE id = 'cmp-3';
+UPDATE companies SET created_at = '2025-03-11T12:15:00Z' WHERE id = 'cmp-4';
+UPDATE companies SET created_at = '2025-03-28T14:10:00Z' WHERE id = 'cmp-5';
+UPDATE companies SET created_at = '2025-04-09T11:20:00Z' WHERE id = 'cmp-6';
+UPDATE companies SET created_at = '2025-05-18T13:05:00Z' WHERE id = 'cmp-7';
+UPDATE companies SET created_at = '2025-06-02T09:40:00Z' WHERE id = 'cmp-8';
+UPDATE companies SET created_at = '2025-07-14T15:25:00Z' WHERE id = 'cmp-9';
+UPDATE companies SET created_at = '2025-08-21T10:50:00Z' WHERE id = 'cmp-10';
+UPDATE companies SET created_at = '2025-09-05T16:10:00Z' WHERE id = 'cmp-11';
+UPDATE companies SET created_at = '2025-10-01T09:15:00Z' WHERE id = 'cmp-12';

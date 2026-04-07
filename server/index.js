@@ -6,6 +6,11 @@ import { pool, testConnection } from "./db.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const parsedPasswordSaltRounds = Number.parseInt(process.env.BCRYPT_SALT_ROUNDS || "10", 10);
+const PASSWORD_SALT_ROUNDS =
+  Number.isFinite(parsedPasswordSaltRounds) && parsedPasswordSaltRounds >= 8 && parsedPasswordSaltRounds <= 15
+    ? parsedPasswordSaltRounds
+    : 10;
 
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
@@ -109,6 +114,10 @@ async function verifyPassword(storedPassword, providedPassword) {
   return storedPassword === providedPassword;
 }
 
+async function hashPassword(password) {
+  return bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
+}
+
 function mapAttachments(input) {
   if (!Array.isArray(input)) return [];
 
@@ -172,15 +181,15 @@ app.post("/api/auth/register", async (req, res) => {
     const password = String(req.body.password || "");
 
     if (!companyName || !displayName || !city || !industry || !email || !password) {
-      return res.status(400).json({ message: "Заполните все поля регистрации." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ message: "Укажите корректный email." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ message: "Пароль должен содержать минимум 6 символов." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     await client.query("BEGIN");
@@ -193,7 +202,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     const companyId = `cmp-${crypto.randomUUID()}`;
     const userId = `usr-${crypto.randomUUID()}`;
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     await client.query(
       `INSERT INTO companies (id, name, city, phone, industry, rating, description, about, specializations, reviews)
@@ -261,7 +270,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!user || !passwordOk) return res.status(401).json({ message: "Неверный email или пароль." });
 
     if (!isBcryptHash(user.password)) {
-      const nextHash = await bcrypt.hash(normalizedPassword, 10);
+      const nextHash = await hashPassword(normalizedPassword);
       await pool.query("UPDATE users SET password = $2 WHERE id = $1", [user.id, nextHash]);
       user.password = nextHash;
     }
@@ -308,11 +317,11 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
       : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
 
     if (!displayName) {
-      return res.status(400).json({ message: "Укажите контактное имя." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ message: "Укажите корректный email." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     const userResult = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
@@ -336,7 +345,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     if (req.user.companyId) {
       if (!companyName || !city || !industry || !description || !about) {
         await client.query("ROLLBACK");
-        return res.status(400).json({ message: "Заполните название компании, город, отрасль, описание и блок О компании." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
       }
 
       await client.query(
@@ -463,12 +472,12 @@ app.post("/api/orders/:id/view", optionalAuthMiddleware, async (req, res) => {
 
 app.post("/api/chats/open", authMiddleware, async (req, res) => {
   try {
-    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может писать сообщения." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     const otherCompanyId = String(req.body.companyId || "").trim();
     const orderId = String(req.body.orderId || "").trim() || null;
 
-    if (!otherCompanyId) return res.status(400).json({ message: "Не выбрана компания для диалога." });
-    if (otherCompanyId === req.user.companyId) return res.status(400).json({ message: "Нельзя открыть чат с собственной компанией." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
 
     let subject = String(req.body.subject || "").trim();
     let orderDetails = null;
@@ -527,7 +536,7 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, chatId });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось открыть чат.", error: error.message });
+    res.status(500).json({ message: "Не удалось удалить чат.", error: error.message });
   }
 });
 
@@ -621,13 +630,13 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может архивировать чат." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
 
     const isArchived = Boolean(req.body.isArchived);
 
     if (isArchived) {
       if (normalizeLifecycleStatus(chat.lifecycleStatus) !== "closed") {
-        return res.status(400).json({ message: "Перенести чат в архив можно только после статуса Закрыто." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
       }
 
       await pool.query(
@@ -654,15 +663,15 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
 app.delete("/api/chats/:id", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
-    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
     if (!(req.user.role === "admin" || req.user.companyId)) {
-      return res.status(400).json({ message: "?????? ?????????????? ???????? ??? ????????????? ????? ??????? ???." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     await pool.query("DELETE FROM chats WHERE id = $1", [req.params.id]);
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ??????? ???.", error: error.message });
+    res.status(500).json({ message: "Не удалось удалить чат.", error: error.message });
   }
 });
 
@@ -692,12 +701,12 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может менять статус переговоров." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
 
     const nextStatus = String(req.body.status || "").trim();
     const allowedStatuses = ["negotiation", "closed"];
     if (!allowedStatuses.includes(nextStatus)) {
-      return res.status(400).json({ message: "Недопустимый статус переговоров." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     const currentStatus = normalizeLifecycleStatus(chat.lifecycleStatus);
@@ -722,8 +731,8 @@ app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, re
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может подтверждать статус переговоров." });
-    if (!chat.pendingStatus) return res.status(400).json({ message: "Нет активного запроса на смену статуса." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     if (chat.pendingStatusRequestedByCompanyId === req.user.companyId) {
       return res.status(403).json({ message: "Нельзя подтверждать или отклонять собственный запрос на смену статуса." });
     }
@@ -763,13 +772,13 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может писать сообщения." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
 
     const text = String(req.body.text || "").trim();
     const attachments = mapAttachments(req.body.attachments);
 
     if (!text && attachments.length === 0) {
-      return res.status(400).json({ message: "Добавьте текст или вложение." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     await pool.query(
@@ -799,18 +808,18 @@ app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
     }
 
     if (req.user.companyId === req.params.id) {
-      return res.status(400).json({ message: "Нельзя оставить отзыв о своей компании." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     const textValue = String(req.body.text || "").trim();
     const ratingValue = Number(req.body.rating);
 
     if (!textValue) {
-      return res.status(400).json({ message: "Введите текст отзыва." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
-      return res.status(400).json({ message: "Укажите оценку от 1 до 5 звёзд." });
+      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
     }
 
     const companyResult = await pool.query("SELECT reviews FROM companies WHERE id = $1", [req.params.id]);
@@ -868,6 +877,7 @@ app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
               c.about,
               c.specializations,
               c.reviews,
+              to_char(c.created_at, 'DD.MM.YYYY') AS "createdAt",
               CASE WHEN $1 THEN cu.display_name ELSE NULL END AS "contactName",
               CASE WHEN $1 THEN cu.email ELSE NULL END AS "contactEmail"
        FROM companies c
@@ -901,6 +911,9 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+
+
+
 
 
 
