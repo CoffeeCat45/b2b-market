@@ -123,6 +123,20 @@ function mapAttachments(input) {
     .slice(0, 5);
 }
 
+function normalizeLifecycleStatus(status) {
+  const normalized = String(status || "").trim();
+
+  if (!normalized || normalized === "active") {
+    return "negotiation";
+  }
+
+  if (["negotiation", "closed", "archived"].includes(normalized)) {
+    return normalized;
+  }
+
+  return "negotiation";
+}
+
 async function getChatForUser(chatId, user) {
   const result = await pool.query(
     `SELECT id, company_a_id AS "companyAId", company_b_id AS "companyBId", CASE WHEN $3 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = chats.id AND archive_state.company_id = $3) END AS "isArchived", lifecycle_status AS "lifecycleStatus", pending_status AS "pendingStatus", pending_status_requested_by_company_id AS "pendingStatusRequestedByCompanyId"

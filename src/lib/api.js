@@ -19,7 +19,9 @@ export async function apiFetch(path, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || "Ошибка запроса.");
+    const message = String(data.message || "?????? ???????.");
+    const details = String(data.error || "").trim();
+    throw new Error(details ? `${message} ${details}` : message);
   }
 
   return data;
