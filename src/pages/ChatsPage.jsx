@@ -6,7 +6,6 @@ import { apiFetch } from "../lib/api";
 
 const ACCEPTED_FILES = ["application/pdf", "image/jpeg", "image/png"];
 const CHAT_STATUS_OPTIONS = [
-  { value: "active", label: "Активно" },
   { value: "negotiation", label: "В переговорах" },
   { value: "closed", label: "Закрыто" },
   { value: "archived", label: "В архиве" },
@@ -313,7 +312,7 @@ function ChatsPage() {
 
     if (nextStatus === "archived") {
       if (baseStatusValue !== "closed") {
-        setError("????????? ??? ? ????? ????? ?????? ????? ??????? ???????.");
+        setError("Перенести чат в архив можно только после статуса Закрыто.");
         return;
       }
 
@@ -325,7 +324,7 @@ function ChatsPage() {
           body: JSON.stringify({ isArchived: true }),
         });
         setSidebarMode("archived");
-        setDetailsStatus("??? ????????? ? ??? ?????.");
+        setDetailsStatus("Чат перенесён в ваш архив.");
         await loadChats();
       } catch (statusError) {
         setError(statusError.message);
@@ -356,7 +355,7 @@ function ChatsPage() {
         method: "PUT",
         body: JSON.stringify({ status: nextStatus }),
       });
-      setDetailsStatus(`?????? ?? ?????? "${CHAT_STATUS_LABELS[nextStatus]}" ?????????.`);
+      setDetailsStatus(`Запрос на статус "${CHAT_STATUS_LABELS[nextStatus]}" отправлен.`);
       await loadChats();
     } catch (statusError) {
       setError(statusError.message);

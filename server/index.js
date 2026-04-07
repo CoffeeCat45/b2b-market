@@ -268,11 +268,11 @@ app.post("/api/auth/verify-password", authMiddleware, async (req, res) => {
     const storedPassword = result.rows[0]?.password || "";
     const ok = await verifyPassword(storedPassword, password);
 
-    if (!ok) return res.status(401).json({ message: "???????? ??????." });
+    if (!ok) return res.status(401).json({ message: "Неверный пароль." });
 
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ??????????? ??????.", error: error.message });
+    res.status(500).json({ message: "Не удалось подтвердить пароль.", error: error.message });
   }
 });
 
@@ -294,11 +294,11 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
       : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
 
     if (!displayName) {
-      return res.status(400).json({ message: "??????? ?????????? ???." });
+      return res.status(400).json({ message: "Укажите контактное имя." });
     }
 
-    if (!email || !/^S+@S+.S+$/.test(email)) {
-      return res.status(400).json({ message: "??????? ?????????? email." });
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ message: "Укажите корректный email." });
     }
 
     const userResult = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
@@ -306,7 +306,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     const passwordOk = await verifyPassword(storedPassword, currentPassword);
 
     if (!passwordOk) {
-      return res.status(401).json({ message: "???????? ??????." });
+      return res.status(401).json({ message: "Неверный пароль." });
     }
 
     await client.query("BEGIN");
@@ -586,7 +586,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
 app.post("/api/chats/:id/read", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
-    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
     if (!req.user.companyId) return res.json({ ok: true });
 
     await pool.query(
@@ -599,21 +599,21 @@ app.post("/api/chats/:id/read", authMiddleware, async (req, res) => {
 
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ???????? ??? ??? ???????????.", error: error.message });
+    res.status(500).json({ message: "Не удалось отметить чат как прочитанный.", error: error.message });
   }
 });
 
 app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
-    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
-    if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ???????????? ???." });
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
+    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может архивировать чат." });
 
     const isArchived = Boolean(req.body.isArchived);
 
     if (isArchived) {
       if (normalizeLifecycleStatus(chat.lifecycleStatus) !== "closed") {
-        return res.status(400).json({ message: "????????? ??? ? ????? ????? ?????? ????? ??????? ???????." });
+        return res.status(400).json({ message: "Перенести чат в архив можно только после статуса Закрыто." });
       }
 
       await pool.query(
@@ -633,7 +633,7 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, isArchived });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ???????? ????? ????.", error: error.message });
+    res.status(500).json({ message: "Не удалось обновить архив чата.", error: error.message });
   }
 });
 
@@ -662,13 +662,13 @@ app.put("/api/chats/:id/details", authMiddleware, async (req, res) => {
 app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
-    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
-    if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ?????? ?????? ???????????." });
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
+    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может менять статус переговоров." });
 
     const nextStatus = String(req.body.status || "").trim();
     const allowedStatuses = ["negotiation", "closed"];
     if (!allowedStatuses.includes(nextStatus)) {
-      return res.status(400).json({ message: "???????????? ?????? ???????????." });
+      return res.status(400).json({ message: "Недопустимый статус переговоров." });
     }
 
     const currentStatus = normalizeLifecycleStatus(chat.lifecycleStatus);
@@ -686,17 +686,17 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, pendingStatus: nextStatus });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ????????? ?????? ?? ????? ???????.", error: error.message });
+    res.status(500).json({ message: "Не удалось отправить запрос на смену статуса.", error: error.message });
   }
 });
 app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
-    if (!chat) return res.status(404).json({ message: "??? ?? ??????." });
-    if (!req.user.companyId) return res.status(400).json({ message: "?????? ???????? ????? ???????????? ?????? ???????????." });
-    if (!chat.pendingStatus) return res.status(400).json({ message: "??? ????????? ??????? ?? ????? ???????." });
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
+    if (!req.user.companyId) return res.status(400).json({ message: "Только компания может подтверждать статус переговоров." });
+    if (!chat.pendingStatus) return res.status(400).json({ message: "Нет активного запроса на смену статуса." });
     if (chat.pendingStatusRequestedByCompanyId === req.user.companyId) {
-      return res.status(403).json({ message: "?????? ???????????? ??? ????????? ??????????? ?????? ?? ????? ???????." });
+      return res.status(403).json({ message: "Нельзя подтверждать или отклонять собственный запрос на смену статуса." });
     }
 
     const accepted = Boolean(req.body.accepted);
@@ -726,7 +726,7 @@ app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, re
 
     res.json({ ok: true, accepted: false });
   } catch (error) {
-    res.status(500).json({ message: "?? ??????? ?????????? ?????? ?? ????? ???????.", error: error.message });
+    res.status(500).json({ message: "Не удалось обработать запрос на смену статуса.", error: error.message });
   }
 });
 
