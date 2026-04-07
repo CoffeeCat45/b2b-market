@@ -393,7 +393,7 @@ main {
 }
 
 .hero-panel-card.alternate {
-  min-height: 160px;
+  min-height: 200px;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.94), rgba(220, 233, 255, 0.95));
   color: var(--navy);
 }
