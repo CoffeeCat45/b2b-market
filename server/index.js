@@ -470,7 +470,12 @@ app.post("/api/orders", authMiddleware, async (req, res) => {
     const payload = mapOrderPayload(req.body);
     if (payload.error) return res.status(400).json({ message: payload.error });
     const id = `ord-${Date.now()}`;
-    const companyId = req.user.role === "admin" ? req.body.companyId : req.user.companyId;
+    const companyId = req.user.role === "admin" ? String(req.body.companyId || "").trim() : req.user.companyId;
+    if (!companyId) return res.status(400).json({ message: "Выберите компанию для объявления." });
+
+    const companyExists = await pool.query("SELECT id FROM companies WHERE id = $1", [companyId]);
+    if (!companyExists.rows[0]) return res.status(404).json({ message: "Компания для объявления не найдена." });
+
     await pool.query(
       `INSERT INTO orders (id, company_id, title, category, city_major, location_detail, city, budget_from, budget_to, budget_label, summary, description, terms, tags, published_at, sort_order)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,COALESCE((SELECT MAX(sort_order)+1 FROM orders),1))`,
@@ -484,15 +489,20 @@ app.post("/api/orders", authMiddleware, async (req, res) => {
 
 app.put("/api/orders/:id", authMiddleware, async (req, res) => {
   try {
-    const existing = await pool.query("SELECT company_id AS \"companyId\" FROM orders WHERE id = $1", [req.params.id]);
+    const existing = await pool.query("SELECT company_id AS \"companyId\", published_at AS \"publishedAt\" FROM orders WHERE id = $1", [req.params.id]);
     const order = existing.rows[0];
     if (!order) return res.status(404).json({ message: "Объявление не найдено." });
     if (!(req.user.role === "admin" || req.user.companyId === order.companyId)) return res.status(403).json({ message: "Недостаточно прав." });
-    const payload = mapOrderPayload(req.body);
+    const payload = mapOrderPayload({ ...req.body, date: order.publishedAt });
     if (payload.error) return res.status(400).json({ message: payload.error });
+
+    const nextCompanyId = req.user.role === "admin" ? String(req.body.companyId || order.companyId).trim() : order.companyId;
+    const companyExists = await pool.query("SELECT id FROM companies WHERE id = $1", [nextCompanyId]);
+    if (!companyExists.rows[0]) return res.status(404).json({ message: "Компания для объявления не найдена." });
+
     await pool.query(
-      `UPDATE orders SET title=$2, category=$3, city_major=$4, location_detail=$5, city=$6, budget_from=$7, budget_to=$8, budget_label=$9, summary=$10, description=$11, terms=$12, tags=$13::jsonb, published_at=$14 WHERE id=$1`,
-      [req.params.id, payload.title, payload.category, payload.cityMajor, payload.locationDetail, payload.city, payload.budgetFrom, payload.budgetTo, payload.budgetLabel, payload.summary, payload.description, payload.terms, JSON.stringify(payload.tags), payload.publishedAt],
+      `UPDATE orders SET company_id=$2, title=$3, category=$4, city_major=$5, location_detail=$6, city=$7, budget_from=$8, budget_to=$9, budget_label=$10, summary=$11, description=$12, terms=$13, tags=$14::jsonb, published_at=$15 WHERE id=$1`,
+      [req.params.id, nextCompanyId, payload.title, payload.category, payload.cityMajor, payload.locationDetail, payload.city, payload.budgetFrom, payload.budgetTo, payload.budgetLabel, payload.summary, payload.description, payload.terms, JSON.stringify(payload.tags), order.publishedAt],
     );
     res.json({ ok: true });
   } catch (error) {
@@ -1013,15 +1023,29 @@ app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
 app.get("/api/suppliers", async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT s.id, s.company_id AS "companyId", s.name, s.city, s.industry, s.rating, s.summary, s.description, s.skills,
+      `SELECT c.id,
+              c.id AS "companyId",
+              c.name,
+              c.city,
+              c.industry,
+              COALESCE(
+                (
+                  SELECT ROUND(AVG((review->>'rating')::numeric), 1)
+                  FROM jsonb_array_elements(COALESCE(c.reviews, '[]'::jsonb)) review
+                  WHERE jsonb_typeof(review) = 'object' AND review ? 'rating'
+                ),
+                c.rating
+              ) AS rating,
+              c.description AS summary,
+              c.about AS description,
+              c.specializations AS skills,
               c.avatar_url AS "avatarUrl",
               c.avatar_position_x AS "avatarPositionX",
               c.avatar_position_y AS "avatarPositionY",
               c.avatar_scale AS "avatarScale",
-              to_char(s.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt"
-       FROM suppliers s
-       LEFT JOIN companies c ON c.id = s.company_id
-       ORDER BY s.created_at DESC, s.id ASC`,
+              to_char(c.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt"
+       FROM companies c
+       ORDER BY c.created_at DESC, c.id ASC`,
     );
     res.json(result.rows);
   } catch (error) {
