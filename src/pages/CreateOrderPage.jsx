@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 
-const emptyForm = { title: "", category: "Оптовые поставки", cityMajor: "", locationDetail: "", budgetFrom: "", budgetTo: "", summary: "", description: "", terms: "", tags: "", companyId: "" };
+const emptyForm = { title: "", category: "", cityMajor: "", locationDetail: "", budgetFrom: "", budgetTo: "", summary: "", description: "", terms: "", tags: "", companyId: "" };
 
 function CreateOrderPage() {
   const { user, loading } = useAuth();
@@ -19,7 +19,17 @@ function CreateOrderPage() {
   const editId = searchParams.get("edit");
   const editingOrder = useMemo(() => orders.find((item) => item.id === editId) || null, [orders, editId]);
   const isEditing = Boolean(editId && editingOrder);
-  const citySuggestions = useMemo(() => [], []);
+  const categorySuggestions = useMemo(
+    () => [...new Set(orders.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
+    [orders],
+  );
+  const citySuggestions = useMemo(
+    () => [...new Set([
+      ...orders.map((item) => item.cityMajor || item.city),
+      ...companies.map((company) => company.city),
+    ].filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
+    [orders, companies],
+  );
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -106,7 +116,13 @@ function CreateOrderPage() {
                   </select>
                 </label>
               ) : null}
-              <label className="field"><span>Категория</span><input name="orderCategory" value={form.category} onChange={(event) => updateField("category", event.target.value)} /></label>
+              <label className="field">
+                <span>Категория</span>
+                <input name="orderCategory" list="order-category-options" value={form.category} onChange={(event) => updateField("category", event.target.value)} />
+                <datalist id="order-category-options">
+                  {categorySuggestions.map((category) => <option key={category} value={category} />)}
+                </datalist>
+              </label>
               <label className="field field-wide"><span>Название</span><input name="orderTitle" value={form.title} onChange={(event) => updateField("title", event.target.value)} /></label>
               <label className="field city-field"><span>Город</span><input name="orderCityMajor" value={form.cityMajor} onChange={(event) => updateField("cityMajor", event.target.value)} placeholder="Город размещения" />{citySuggestions.length ? <div className="field-suggestions">{citySuggestions.map((city) => <button key={city} type="button" className="search-suggestion" onClick={() => updateField("cityMajor", city)}>{city}</button>)}</div> : null}</label>
               <label className="field"><span>Район / пригород</span><input name="orderLocationDetail" value={form.locationDetail} onChange={(event) => updateField("locationDetail", event.target.value)} placeholder="Рыбино или р-н Центральный" /></label>
