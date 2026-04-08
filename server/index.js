@@ -17,14 +17,15 @@ const PASSWORD_SALT_ROUNDS =
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
 
-const CITY_OPTIONS = ["Екатеринбург", "Москва", "Казань", "Челябинск", "Тюмень", "Самара", "Санкт-Петербург", "Новосибирск", "Пермь", "Уфа"];
 const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const ALLOWED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_AVATAR_DATA_URL_LENGTH = 2_500_000;
 
 // Хелперы сессий и авторизации.
 async function getUserByToken(token) {
   if (!token) return null;
   const result = await pool.query(
-    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations
+    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale"
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN companies c ON c.id = u.company_id
@@ -122,6 +123,31 @@ async function hashPassword(password) {
   return bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
 }
 
+function normalizeAvatarPayload(body) {
+  const avatarUrl = String(body.avatarUrl || "").trim();
+  const avatarPositionX = Number(body.avatarPositionX ?? 50);
+  const avatarPositionY = Number(body.avatarPositionY ?? 50);
+  const avatarScale = Number(body.avatarScale ?? 100);
+
+  if (avatarUrl) {
+    const match = avatarUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,/i);
+    if (!match || !ALLOWED_AVATAR_TYPES.has(match[1].toLowerCase())) {
+      return { error: "Аватар должен быть изображением JPG, PNG или WebP." };
+    }
+
+    if (avatarUrl.length > MAX_AVATAR_DATA_URL_LENGTH) {
+      return { error: "Аватар слишком большой. Загрузите изображение до 2 МБ." };
+    }
+  }
+
+  return {
+    avatarUrl,
+    avatarPositionX: Number.isFinite(avatarPositionX) ? Math.max(0, Math.min(100, Math.round(avatarPositionX))) : 50,
+    avatarPositionY: Number.isFinite(avatarPositionY) ? Math.max(0, Math.min(100, Math.round(avatarPositionY))) : 50,
+    avatarScale: Number.isFinite(avatarScale) ? Math.max(100, Math.min(220, Math.round(avatarScale))) : 100,
+  };
+}
+
 function mapAttachments(input) {
   if (!Array.isArray(input)) return [];
 
@@ -150,8 +176,7 @@ function normalizeLifecycleStatus(status) {
   return "negotiation";
 }
 
-// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.
-// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.
+// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.\
 async function getChatForUser(chatId, user) {
   const result = await pool.query(
     `SELECT id, company_a_id AS "companyAId", company_b_id AS "companyBId", CASE WHEN $3 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = chats.id AND archive_state.company_id = $3) END AS "isArchived", lifecycle_status AS "lifecycleStatus", pending_status AS "pendingStatus", pending_status_requested_by_company_id AS "pendingStatusRequestedByCompanyId"
@@ -172,8 +197,46 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
-app.get("/api/locations", (_req, res) => {
-  res.json({ cities: CITY_OPTIONS });
+app.get("/api/locations", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT city
+       FROM (
+         SELECT NULLIF(TRIM(city), '') AS city FROM companies
+         UNION
+         SELECT NULLIF(TRIM(city), '') AS city FROM suppliers
+         UNION
+         SELECT NULLIF(TRIM(city_major), '') AS city FROM orders
+       ) locations
+       WHERE city IS NOT NULL
+       ORDER BY city ASC`,
+    );
+
+    res.json({ cities: result.rows.map((row) => row.city) });
+  } catch (error) {
+    res.status(500).json({ message: "Не удалось получить список городов.", error: error.message });
+  }
+});
+
+app.get("/api/industries", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT industry
+       FROM (
+         SELECT NULLIF(TRIM(industry), '') AS industry FROM companies
+         UNION
+         SELECT NULLIF(TRIM(industry), '') AS industry FROM suppliers
+         UNION
+         SELECT NULLIF(TRIM(category), '') AS industry FROM orders
+       ) industries
+       WHERE industry IS NOT NULL
+       ORDER BY industry ASC`,
+    );
+
+    res.json({ industries: result.rows.map((row) => row.industry) });
+  } catch (error) {
+    res.status(500).json({ message: "Не удалось получить список отраслей.", error: error.message });
+  }
 });
 
 app.post("/api/auth/register", async (req, res) => {
@@ -267,7 +330,7 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await pool.query(
-      `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity"
+      `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale"
        FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.email = $1`,
       [String(email || "").trim().toLowerCase()],
     );
@@ -596,6 +659,26 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
                 WHEN $2 <> '' AND ch.company_b_id = $2 THEN SUBSTRING(ca.name FROM 1 FOR 2)
                 ELSE SUBSTRING(CONCAT(ca.name, ' / ', cb.name) FROM 1 FOR 2)
               END AS initials,
+              CASE
+                WHEN $2 <> '' AND ch.company_a_id = $2 THEN cb.avatar_url
+                WHEN $2 <> '' AND ch.company_b_id = $2 THEN ca.avatar_url
+                ELSE ''
+              END AS "otherCompanyAvatarUrl",
+              CASE
+                WHEN $2 <> '' AND ch.company_a_id = $2 THEN cb.avatar_position_x
+                WHEN $2 <> '' AND ch.company_b_id = $2 THEN ca.avatar_position_x
+                ELSE 50
+              END AS "otherCompanyAvatarPositionX",
+              CASE
+                WHEN $2 <> '' AND ch.company_a_id = $2 THEN cb.avatar_position_y
+                WHEN $2 <> '' AND ch.company_b_id = $2 THEN ca.avatar_position_y
+                ELSE 50
+              END AS "otherCompanyAvatarPositionY",
+              CASE
+                WHEN $2 <> '' AND ch.company_a_id = $2 THEN cb.avatar_scale
+                WHEN $2 <> '' AND ch.company_b_id = $2 THEN ca.avatar_scale
+                ELSE 100
+              END AS "otherCompanyAvatarScale",
               COALESCE(o.title, ch.subject) AS "contractTitle",
               o.title AS "orderTitle",
               o.budget_label AS "orderBudget",
@@ -892,6 +975,10 @@ app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
               c.city,
               c.phone,
               c.industry,
+              c.avatar_url AS "avatarUrl",
+              c.avatar_position_x AS "avatarPositionX",
+              c.avatar_position_y AS "avatarPositionY",
+              c.avatar_scale AS "avatarScale",
               COALESCE(
                 (
                   SELECT ROUND(AVG((review->>'rating')::numeric), 1)
@@ -926,10 +1013,15 @@ app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
 app.get("/api/suppliers", async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, company_id AS "companyId", name, city, industry, rating, summary, description, skills,
-              to_char(created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt"
-       FROM suppliers
-       ORDER BY created_at DESC, id ASC`,
+      `SELECT s.id, s.company_id AS "companyId", s.name, s.city, s.industry, s.rating, s.summary, s.description, s.skills,
+              c.avatar_url AS "avatarUrl",
+              c.avatar_position_x AS "avatarPositionX",
+              c.avatar_position_y AS "avatarPositionY",
+              c.avatar_scale AS "avatarScale",
+              to_char(s.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt"
+       FROM suppliers s
+       LEFT JOIN companies c ON c.id = s.company_id
+       ORDER BY s.created_at DESC, s.id ASC`,
     );
     res.json(result.rows);
   } catch (error) {

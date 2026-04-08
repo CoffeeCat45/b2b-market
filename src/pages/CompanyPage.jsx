@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import Tabs from "../components/Tabs";
@@ -6,6 +6,7 @@ import ListingCard from "../components/ListingCard";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
+import { getAvatarStyle, getInitials } from "../lib/avatar";
 
 function formatReviewDate(value) {
   if (!value) return "";
@@ -94,7 +95,9 @@ function CompanyPage() {
       <section className="company-section">
         <div className="container">
           <article className="company-hero card" id="contacts">
-            <div className="company-hero-mark">{company.name.slice(0, 2)}</div>
+            <div className="company-hero-mark avatar-frame" style={getAvatarStyle(company)}>
+              {company.avatarUrl ? null : getInitials(company.name)}
+            </div>
             <div className="company-hero-body">
               <span className="pill">{company.industry}</span>
               <h1>{company.name}</h1>

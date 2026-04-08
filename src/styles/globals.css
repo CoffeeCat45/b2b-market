@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -541,6 +541,64 @@ main {
   width: 90px;
   height: 90px;
 }
+
+.avatar-frame {
+  overflow: hidden;
+  background-color: #2457c5;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.profile-avatar-row {
+  align-items: start;
+}
+
+.avatar-editor-field {
+  gap: 12px;
+}
+
+.avatar-editor-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.avatar-editor-preview {
+  width: 112px;
+  height: 112px;
+  display: grid;
+  place-items: center;
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(18, 48, 91, 0.92), rgba(36, 107, 255, 0.86));
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.45rem;
+  border: 1px solid rgba(214, 223, 236, 0.9);
+}
+
+.avatar-editor-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.avatar-upload-button {
+  cursor: pointer;
+}
+
+.avatar-crop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.avatar-crop-grid .field {
+  margin-bottom: 0;
+}
+
 
 .catalog-layout,
 .form-layout {
@@ -2364,6 +2422,16 @@ main {
 }
 
 @media (max-width: 820px) {
+  .avatar-crop-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .avatar-editor-preview {
+    width: 92px;
+    height: 92px;
+    border-radius: 24px;
+  }
+
   .cards-grid,
   .cards-grid-wide {
     gap: 14px;

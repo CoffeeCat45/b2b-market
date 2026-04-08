@@ -1,18 +1,8 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
-
-const INDUSTRY_OPTIONS = [
-  "Оптовые поставки",
-  "Производство",
-  "Логистика",
-  "IT и цифровые услуги",
-  "Маркетинг",
-  "Строительство",
-  "Упаковка",
-  "Пищевое производство",
-];
+import { apiFetch } from "../lib/api";
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -24,10 +14,18 @@ function LoginPage() {
   const [companyName, setCompanyName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [city, setCity] = useState("");
-  const [industry, setIndustry] = useState(INDUSTRY_OPTIONS[0]);
+  const [industry, setIndustry] = useState("");
+  const [industryOptions, setIndustryOptions] = useState([]);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Подсказки отраслей берём из существующих компаний/поставщиков/заказов, но поле остаётся свободным.
+  useEffect(() => {
+    apiFetch("/industries")
+      .then((data) => setIndustryOptions(Array.isArray(data.industries) ? data.industries : []))
+      .catch(() => setIndustryOptions([]));
+  }, []);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -117,10 +115,10 @@ function LoginPage() {
                   list="industry-options"
                   value={industry}
                   onChange={(event) => setIndustry(event.target.value)}
-                  placeholder="Выберите или укажите свою сферу"
+                  placeholder="Выберите существующую или укажите свою сферу"
                 />
                 <datalist id="industry-options">
-                  {INDUSTRY_OPTIONS.map((item) => (
+                  {industryOptions.map((item) => (
                     <option key={item} value={item} />
                   ))}
                 </datalist>
@@ -150,4 +148,3 @@ function LoginPage() {
 }
 
 export default LoginPage;
-

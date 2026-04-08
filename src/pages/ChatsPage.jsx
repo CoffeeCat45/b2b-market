@@ -3,6 +3,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
+import { getAvatarStyle, getInitials } from "../lib/avatar";
 
 const ACCEPTED_FILES = ["application/pdf", "image/jpeg", "image/png"];
 const CHAT_STATUS_OPTIONS = [
@@ -19,6 +20,15 @@ function readFileAsDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function getChatAvatarEntity(chat) {
+  return {
+    avatarUrl: chat?.otherCompanyAvatarUrl,
+    avatarPositionX: chat?.otherCompanyAvatarPositionX,
+    avatarPositionY: chat?.otherCompanyAvatarPositionY,
+    avatarScale: chat?.otherCompanyAvatarScale,
+  };
 }
 
 function formatRequested(chat) {
@@ -593,7 +603,9 @@ function ChatsPage() {
                     onClick={() => selectChat(chat.id)}
                     onContextMenu={(event) => handleChatContextMenu(event, chat)}
                   >
-                    <span className="chat-room-avatar">{chat.initials || (chat.otherCompanyName || "Чат").slice(0, 2)}</span>
+                    <span className="chat-room-avatar avatar-frame" style={getAvatarStyle(getChatAvatarEntity(chat))}>
+                      {chat.otherCompanyAvatarUrl ? null : (chat.initials || getInitials(chat.otherCompanyName || "Чат"))}
+                    </span>
                     <span className="chat-room-copy">
                       <strong>{chat.otherCompanyName}</strong>
                       <span className="chat-room-preview">{getLastMessagePreview(chat)}</span>
@@ -665,7 +677,9 @@ function ChatsPage() {
                         </button>
                       ) : null}
                       <Link to={selectedChat.otherCompanyId ? `/company/${selectedChat.otherCompanyId}` : "#"} className="chat-window-title chat-window-title-link">
-                        <span className="chat-room-avatar large">{selectedChat.initials || selectedChat.otherCompanyName.slice(0, 2)}</span>
+                        <span className="chat-room-avatar large avatar-frame" style={getAvatarStyle(getChatAvatarEntity(selectedChat))}>
+                          {selectedChat.otherCompanyAvatarUrl ? null : (selectedChat.initials || getInitials(selectedChat.otherCompanyName))}
+                        </span>
                         <div>
                           <strong>{selectedChat.otherCompanyName}</strong>
                           <span>{selectedChat.contractTitle}</span>

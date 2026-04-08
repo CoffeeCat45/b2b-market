@@ -3,6 +3,7 @@ import { Navigate, Link, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
+import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 
 function CreatePage() {
@@ -26,6 +27,10 @@ function CreatePage() {
     description: "",
     about: "",
     specializations: "",
+    avatarUrl: "",
+    avatarPositionX: 50,
+    avatarPositionY: 50,
+    avatarScale: 100,
   });
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
@@ -56,6 +61,41 @@ function CreatePage() {
 
   const updateProfileField = (field, value) => setProfileForm((current) => ({ ...current, [field]: value }));
 
+  // Мини-редактор аватарки хранит исходное изображение и параметры кадрирования без отдельного storage.
+  const handleAvatarFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setProfileError("Поддерживаются только JPG, PNG или WebP.");
+      return;
+    }
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setProfileError("Поддерживаются только JPG, PNG или WebP.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setProfileError("Аватар слишком большой. Загрузите изображение до 2 МБ.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProfileError("");
+      setProfileForm((current) => ({
+        ...current,
+        avatarUrl: String(reader.result || ""),
+        avatarPositionX: 50,
+        avatarPositionY: 50,
+        avatarScale: 100,
+      }));
+    };
+    reader.onerror = () => setProfileError("Не удалось прочитать файл аватарки.");
+    reader.readAsDataURL(file);
+  };
+
   // Модалка профиля разбита на просмотр -> подтверждение пароля -> редактирование, чтобы не менять данные случайно.
   const openProfileModal = () => {
     setProfileModalOpen(true);
@@ -72,6 +112,10 @@ function CreatePage() {
       description: currentCompany?.description || user?.description || "",
       about: currentCompany?.about || user?.about || "",
       specializations: (currentCompany?.specializations || user?.specializations || []).join(", "),
+      avatarUrl: currentCompany?.avatarUrl || user?.avatarUrl || "",
+      avatarPositionX: currentCompany?.avatarPositionX ?? user?.avatarPositionX ?? 50,
+      avatarPositionY: currentCompany?.avatarPositionY ?? user?.avatarPositionY ?? 50,
+      avatarScale: currentCompany?.avatarScale ?? user?.avatarScale ?? 100,
     });
   };
 
@@ -126,6 +170,10 @@ function CreatePage() {
           description: profileForm.description,
           about: profileForm.about,
           specializations: profileForm.specializations,
+          avatarUrl: profileForm.avatarUrl,
+          avatarPositionX: profileForm.avatarPositionX,
+          avatarPositionY: profileForm.avatarPositionY,
+          avatarScale: profileForm.avatarScale,
         }),
       });
       updateUser(data.user);
@@ -254,6 +302,12 @@ function CreatePage() {
             {profileStep === "view" ? (
               <div className="modal-form-grid">
                 <div className="profile-data-grid">
+                  <div className="profile-avatar-row profile-data-item profile-data-item-wide">
+                    <span>Аватар компании</span>
+                    <div className="avatar-editor-preview avatar-frame" style={getAvatarStyle(profileForm)}>
+                      {profileForm.avatarUrl ? null : getInitials(profileForm.companyName || user.company)}
+                    </div>
+                  </div>
                   <div className="profile-data-item"><span>Контактное имя</span><strong>{profileForm.displayName || "Не указано"}</strong></div>
                   <div className="profile-data-item"><span>Email</span><strong>{profileForm.email || "Не указано"}</strong></div>
                   <div className="profile-data-item"><span>Название компании</span><strong>{profileForm.companyName || "Не указано"}</strong></div>
@@ -287,6 +341,26 @@ function CreatePage() {
 
             {profileStep === "edit" ? (
               <form onSubmit={saveProfile} className="modal-form-grid">
+                <div className="field field-wide avatar-editor-field">
+                  <span>Аватар компании</span>
+                  <div className="avatar-editor-panel">
+                    <div className="avatar-editor-preview avatar-frame" style={getAvatarStyle(profileForm)}>
+                      {profileForm.avatarUrl ? null : getInitials(profileForm.companyName || user.company)}
+                    </div>
+                    <div className="avatar-editor-controls">
+                      <label className="button button-secondary avatar-upload-button" htmlFor="profileAvatarFile">Загрузить изображение</label>
+                      <input id="profileAvatarFile" name="profileAvatarFile" className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarFileChange} />
+                      {profileForm.avatarUrl ? <button type="button" className="button button-ghost" onClick={() => setProfileForm((current) => ({ ...current, avatarUrl: "", avatarPositionX: 50, avatarPositionY: 50, avatarScale: 100 }))}>Удалить аватар</button> : null}
+                    </div>
+                  </div>
+                  {profileForm.avatarUrl ? (
+                    <div className="avatar-crop-grid">
+                      <label className="field"><span>Сдвиг по горизонтали</span><input name="profileAvatarPositionX" type="range" min="0" max="100" value={profileForm.avatarPositionX} onChange={(event) => updateProfileField("avatarPositionX", Number(event.target.value))} /></label>
+                      <label className="field"><span>Сдвиг по вертикали</span><input name="profileAvatarPositionY" type="range" min="0" max="100" value={profileForm.avatarPositionY} onChange={(event) => updateProfileField("avatarPositionY", Number(event.target.value))} /></label>
+                      <label className="field"><span>Масштаб</span><input name="profileAvatarScale" type="range" min="100" max="220" value={profileForm.avatarScale} onChange={(event) => updateProfileField("avatarScale", Number(event.target.value))} /></label>
+                    </div>
+                  ) : null}
+                </div>
                 <label className="field"><span>Контактное имя</span><input name="profileDisplayName" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
                 <label className="field"><span>Email</span><input name="profileEmail" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
                 <label className="field"><span>Название компании</span><input name="profileCompanyName" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>

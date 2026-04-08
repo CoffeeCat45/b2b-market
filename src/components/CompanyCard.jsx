@@ -1,5 +1,6 @@
-﻿import { Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getAvatarStyle, getInitials } from "../lib/avatar";
 
 function CompanyCard({ supplier, onTagClick }) {
   const { user } = useAuth();
@@ -19,7 +20,9 @@ function CompanyCard({ supplier, onTagClick }) {
 
   return (
     <article className="card company-card card-clickable" role="link" tabIndex={0} onClick={openCard} onKeyDown={handleKeyDown}>
-      <div className="company-avatar">{supplier.name.slice(0, 2)}</div>
+      <div className="company-avatar avatar-frame" style={getAvatarStyle(supplier)}>
+        {supplier.avatarUrl ? null : getInitials(supplier.name)}
+      </div>
       <div className="company-body">
         <div className="card-topline"><span className="pill pill-light">{supplier.industry}</span><span className="rating">★ {supplier.rating}</span></div>
         <h3>{supplier.name}</h3>
