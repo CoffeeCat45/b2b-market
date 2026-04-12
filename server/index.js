@@ -369,6 +369,67 @@ app.post("/api/auth/verify-password", authMiddleware, async (req, res) => {
   }
 });
 
+app.put("/api/auth/password", authMiddleware, async (req, res) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || "");
+    const nextPassword = String(req.body.nextPassword || "");
+
+    if (nextPassword.length < 6) {
+      return res.status(400).json({ message: "Пароль должен быть не короче 6 символов." });
+    }
+
+    const result = await pool.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
+    const storedPassword = result.rows[0]?.password || "";
+    const passwordOk = await verifyPassword(storedPassword, currentPassword);
+
+    if (!passwordOk) {
+      return res.status(401).json({ message: "Неверный пароль." });
+    }
+
+    const nextHash = await hashPassword(nextPassword);
+    await pool.query("UPDATE users SET password = $2 WHERE id = $1", [req.user.id, nextHash]);
+
+    const header = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+    await pool.query("DELETE FROM sessions WHERE user_id = $1 AND token <> $2", [req.user.id, token]);
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Не удалось сменить пароль.", error: error.message });
+  }
+});
+
+app.delete("/api/auth/company", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    if (req.user.role !== "company" || !req.user.companyId) {
+      return res.status(403).json({ message: "Удалить можно только аккаунт компании." });
+    }
+
+    const password = String(req.body.password || "");
+    const result = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
+    const storedPassword = result.rows[0]?.password || "";
+    const passwordOk = await verifyPassword(storedPassword, password);
+
+    if (!passwordOk) {
+      return res.status(401).json({ message: "Неверный пароль." });
+    }
+
+    await client.query("BEGIN");
+    await client.query("DELETE FROM users WHERE company_id = $1", [req.user.companyId]);
+    await client.query("DELETE FROM companies WHERE id = $1", [req.user.companyId]);
+    await client.query("COMMIT");
+
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ message: "Не удалось удалить компанию.", error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.put("/api/auth/profile", authMiddleware, async (req, res) => {
   const client = await pool.connect();
 
@@ -385,6 +446,11 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     const specializations = Array.isArray(req.body.specializations)
       ? req.body.specializations.map((item) => String(item || "").trim()).filter(Boolean)
       : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
+    const avatar = normalizeAvatarPayload(req.body);
+
+    if (avatar.error) {
+      return res.status(400).json({ message: avatar.error });
+    }
 
     if (!displayName) {
       return res.status(400).json({ message: "Укажите контактное имя." });
@@ -419,8 +485,20 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
       }
 
       await client.query(
-        "UPDATE companies SET name = $2, city = $3, phone = $4, industry = $5, description = $6, about = $7, specializations = $8::jsonb WHERE id = $1",
-        [req.user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations)],
+        `UPDATE companies
+         SET name = $2,
+             city = $3,
+             phone = $4,
+             industry = $5,
+             description = $6,
+             about = $7,
+             specializations = $8::jsonb,
+             avatar_url = $9,
+             avatar_position_x = $10,
+             avatar_position_y = $11,
+             avatar_scale = $12
+         WHERE id = $1`,
+        [req.user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations), avatar.avatarUrl, avatar.avatarPositionX, avatar.avatarPositionY, avatar.avatarScale],
       );
     }
 

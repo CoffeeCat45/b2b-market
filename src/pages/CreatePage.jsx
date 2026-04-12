@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Navigate, Link, useSearchParams } from "react-router-dom";
+import { Navigate, Link, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
@@ -10,6 +10,7 @@ function CreatePage() {
   const { user, loading, updateUser } = useAuth();
   const { orders, companies, reload } = useMarketplaceData();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [adminSearch, setAdminSearch] = useState("");
@@ -34,6 +35,8 @@ function CreatePage() {
   });
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", nextPassword: "", confirmPassword: "" });
+  const [deletePassword, setDeletePassword] = useState("");
 
   // Старые chat query params перенаправляем в отдельный workspace чатов.
   const chatCompany = searchParams.get("chatCompany");
@@ -102,6 +105,8 @@ function CreatePage() {
     setProfileStep("view");
     setProfilePassword("");
     setProfileError("");
+    setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
+    setDeletePassword("");
     setProfileForm({
       displayName: user?.displayName || "",
       email: user?.email || "",
@@ -125,6 +130,8 @@ function CreatePage() {
     setProfilePassword("");
     setProfileError("");
     setProfileLoading(false);
+    setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
+    setDeletePassword("");
   };
 
   const startProfileEdit = () => {
@@ -132,6 +139,20 @@ function CreatePage() {
     setProfilePassword("");
     setProfileError("");
   };
+
+  const startPasswordChange = () => {
+    setProfileStep("password");
+    setProfileError("");
+    setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
+  };
+
+  const startCompanyDelete = () => {
+    setProfileStep("delete");
+    setProfileError("");
+    setDeletePassword("");
+  };
+
+  const updatePasswordField = (field, value) => setPasswordForm((current) => ({ ...current, [field]: value }));
 
   const verifyProfilePassword = async (event) => {
     event.preventDefault();
@@ -188,6 +209,51 @@ function CreatePage() {
   };
 
   // Управление объявлениями остаётся в кабинете, а создание и редактирование вынесены на отдельную страницу.
+  const changePassword = async (event) => {
+    event.preventDefault();
+    setProfileError("");
+
+    if (passwordForm.nextPassword !== passwordForm.confirmPassword) {
+      setProfileError("Пароли не совпадают.");
+      return;
+    }
+
+    setProfileLoading(true);
+
+    try {
+      await apiFetch("/auth/password", {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword: passwordForm.currentPassword, nextPassword: passwordForm.nextPassword }),
+      });
+      setStatus("Пароль изменён.");
+      closeProfileModal();
+    } catch (passwordError) {
+      setProfileError(passwordError.message);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const deleteCompany = async (event) => {
+    event.preventDefault();
+    setProfileError("");
+    setProfileLoading(true);
+
+    try {
+      await apiFetch("/auth/company", {
+        method: "DELETE",
+        body: JSON.stringify({ password: deletePassword }),
+      });
+      localStorage.removeItem("auth_token");
+      updateUser(null);
+      navigate("/login", { replace: true });
+    } catch (deleteError) {
+      setProfileError(deleteError.message);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
   const removeOrder = async (id) => {
     try {
       await apiFetch(`/orders/${id}`, { method: "DELETE" });
@@ -198,6 +264,25 @@ function CreatePage() {
       setError(removeError.message);
     }
   };
+
+  const profileModalTitle = profileStep === "view"
+    ? "Данные компании"
+    : profileStep === "verify"
+      ? "Подтвердите пароль"
+      : profileStep === "password"
+        ? "Смена пароля"
+        : profileStep === "delete"
+          ? "Удаление компании"
+          : "Изменение данных";
+  const profileModalSubtitle = profileStep === "view"
+    ? "Здесь можно посмотреть текущие данные аккаунта."
+    : profileStep === "verify"
+      ? "Перед изменением данных подтвердите пароль от аккаунта."
+      : profileStep === "password"
+        ? "Введите текущий пароль и новый пароль."
+        : profileStep === "delete"
+          ? "Это действие удалит компанию, её объявления, чаты и сессии."
+          : "Измените контакты, описание, отрасль и теги компании.";
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
@@ -293,8 +378,8 @@ function CreatePage() {
           <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h2 id="profile-modal-title">{profileStep === "view" ? "Данные компании" : profileStep === "verify" ? "Подтвердите пароль" : "Изменение данных"}</h2>
-                <p>{profileStep === "view" ? "Здесь можно посмотреть текущие данные аккаунта." : profileStep === "verify" ? "Перед изменением данных подтвердите пароль от аккаунта." : "Измените контакты, описание, отрасль и теги компании."}</p>
+                <h2 id="profile-modal-title">{profileModalTitle}</h2>
+                <p>{profileModalSubtitle}</p>
               </div>
               <button type="button" className="button button-secondary modal-close" onClick={closeProfileModal}>×</button>
             </div>
@@ -318,9 +403,11 @@ function CreatePage() {
                   <div className="profile-data-item profile-data-item-wide"><span>О компании</span><strong>{profileForm.about || "Не указано"}</strong></div>
                   <div className="profile-data-item profile-data-item-wide"><span>Теги</span><strong>{profileForm.specializations || "Не указано"}</strong></div>
                 </div>
-                <div className="modal-actions">
-                  <button type="button" className="button button-secondary" onClick={closeProfileModal}>Закрыть</button>
-                  <button type="button" className="button button-primary" onClick={startProfileEdit}>Изменить</button>
+                <div className="modal-actions modal-actions-stack">
+                  <button type="button" className="button button-secondary" onClick={closeProfileModal}>{"Закрыть"}</button>
+                  <button type="button" className="button button-secondary" onClick={startPasswordChange}>{"Сменить пароль"}</button>
+                  <button type="button" className="button button-danger" onClick={startCompanyDelete}>{"Удалить компанию"}</button>
+                  <button type="button" className="button button-primary" onClick={startProfileEdit}>{"Изменить"}</button>
                 </div>
               </div>
             ) : null}
@@ -335,6 +422,35 @@ function CreatePage() {
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>
                   <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Проверка..." : "Продолжить"}</button>
+                </div>
+              </form>
+            ) : null}
+
+
+            {profileStep === "password" ? (
+              <form onSubmit={changePassword} className="modal-form-grid">
+                <label className="field"><span>{"Текущий пароль"}</span><input name="currentPassword" type="password" value={passwordForm.currentPassword} onChange={(event) => updatePasswordField("currentPassword", event.target.value)} placeholder="Введите текущий пароль" /></label>
+                <label className="field"><span>{"Новый пароль"}</span><input name="nextPassword" type="password" value={passwordForm.nextPassword} onChange={(event) => updatePasswordField("nextPassword", event.target.value)} placeholder="Минимум 6 символов" /></label>
+                <label className="field"><span>{"Повторите новый пароль"}</span><input name="confirmNextPassword" type="password" value={passwordForm.confirmPassword} onChange={(event) => updatePasswordField("confirmPassword", event.target.value)} placeholder="Повторите пароль" /></label>
+                {profileError ? <div className="error-banner">{profileError}</div> : null}
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={() => setProfileStep("view")}>{"Назад"}</button>
+                  <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Сохранение..." : "Сменить пароль"}</button>
+                </div>
+              </form>
+            ) : null}
+
+            {profileStep === "delete" ? (
+              <form onSubmit={deleteCompany} className="modal-form-grid">
+                <div className="danger-panel">
+                  <strong>{"Удаление нельзя будет отменить."}</strong>
+                  <p>{"Исчезнут данные компании, её объявления и чаты. Для подтверждения введите пароль."}</p>
+                </div>
+                <label className="field"><span>{"Пароль"}</span><input name="deleteCompanyPassword" type="password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} placeholder="Введите текущий пароль" /></label>
+                {profileError ? <div className="error-banner">{profileError}</div> : null}
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={() => setProfileStep("view")}>{"Назад"}</button>
+                  <button type="submit" className="button button-danger" disabled={profileLoading}>{profileLoading ? "Удаление..." : "Удалить компанию"}</button>
                 </div>
               </form>
             ) : null}

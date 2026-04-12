@@ -2544,3 +2544,119 @@ main {
     overflow: visible;
   }
 }
+
+
+/* Final spacing and visual hierarchy polish. */
+.search-bar {
+  align-items: stretch;
+}
+
+.search-bar .button {
+  min-height: 56px;
+}
+
+.search-bar select,
+.field select,
+.catalog-sort-control select,
+.chat-status-select {
+  padding-right: 44px;
+}
+
+.login-form .error-banner {
+  margin: 4px 0 10px;
+}
+
+.login-form .button-block {
+  margin-top: 4px;
+}
+
+.footer-links a {
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.footer-links a:hover {
+  color: var(--navy);
+  opacity: 0.82;
+}
+
+.breadcrumbs {
+  margin-bottom: 18px;
+  row-gap: 8px;
+}
+
+.detail-card {
+  display: grid;
+  gap: 16px;
+}
+
+.detail-card h1 {
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.company-hero h1 {
+  margin-bottom: 8px;
+}
+
+.company-hero .card-topline {
+  margin-bottom: 8px;
+}
+
+.tab-panel h2 {
+  font-size: clamp(1.45rem, 2.2vw, 2.05rem);
+  letter-spacing: -0.025em;
+}
+
+@media (max-width: 820px) {
+  .search-bar {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .search-bar input,
+  .search-bar select,
+  .search-bar .button {
+    min-height: 52px;
+  }
+}
+
+
+.button-danger {
+  background: #fff1f0;
+  color: #b42318;
+  box-shadow: inset 0 0 0 1px rgba(180, 35, 24, 0.24);
+}
+
+.button-danger:hover {
+  background: #ffe4e0;
+}
+
+.modal-actions-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.modal-actions-stack .button {
+  width: 100%;
+}
+
+.danger-panel {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(180, 35, 24, 0.24);
+  border-radius: 16px;
+  background: #fff7f5;
+  color: #7a271a;
+}
+
+.danger-panel p {
+  margin: 0;
+  color: #7a271a;
+}
+
+@media (max-width: 560px) {
+  .modal-actions-stack {
+    grid-template-columns: 1fr;
+  }
+}
