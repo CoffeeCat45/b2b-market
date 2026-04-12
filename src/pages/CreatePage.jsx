@@ -37,6 +37,7 @@ function CreatePage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", nextPassword: "", confirmPassword: "" });
   const [deletePassword, setDeletePassword] = useState("");
+  const [initialAvatarUrl, setInitialAvatarUrl] = useState("");
 
   // Старые chat query params перенаправляем в отдельный workspace чатов.
   const chatCompany = searchParams.get("chatCompany");
@@ -107,6 +108,8 @@ function CreatePage() {
     setProfileError("");
     setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
     setDeletePassword("");
+    const nextAvatarUrl = currentCompany?.avatarUrl || user?.avatarUrl || "";
+    setInitialAvatarUrl(nextAvatarUrl);
     setProfileForm({
       displayName: user?.displayName || "",
       email: user?.email || "",
@@ -117,7 +120,7 @@ function CreatePage() {
       description: currentCompany?.description || user?.description || "",
       about: currentCompany?.about || user?.about || "",
       specializations: (currentCompany?.specializations || user?.specializations || []).join(", "),
-      avatarUrl: currentCompany?.avatarUrl || user?.avatarUrl || "",
+      avatarUrl: nextAvatarUrl,
       avatarPositionX: currentCompany?.avatarPositionX ?? user?.avatarPositionX ?? 50,
       avatarPositionY: currentCompany?.avatarPositionY ?? user?.avatarPositionY ?? 50,
       avatarScale: currentCompany?.avatarScale ?? user?.avatarScale ?? 100,
@@ -132,6 +135,7 @@ function CreatePage() {
     setProfileLoading(false);
     setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
     setDeletePassword("");
+    setInitialAvatarUrl("");
   };
 
   const startProfileEdit = () => {
@@ -178,6 +182,7 @@ function CreatePage() {
     setProfileLoading(true);
 
     try {
+      const avatarChanged = profileForm.avatarUrl !== initialAvatarUrl;
       const data = await apiFetch("/auth/profile", {
         method: "PUT",
         body: JSON.stringify({
@@ -191,7 +196,7 @@ function CreatePage() {
           description: profileForm.description,
           about: profileForm.about,
           specializations: profileForm.specializations,
-          avatarUrl: profileForm.avatarUrl,
+          ...(avatarChanged ? { avatarUrl: profileForm.avatarUrl } : {}),
           avatarPositionX: profileForm.avatarPositionX,
           avatarPositionY: profileForm.avatarPositionY,
           avatarScale: profileForm.avatarScale,
@@ -200,7 +205,7 @@ function CreatePage() {
       updateUser(data.user);
       setStatus("Данные компании обновлены.");
       closeProfileModal();
-      await reload();
+      reload().catch(() => {});
     } catch (saveError) {
       setProfileError(saveError.message);
     } finally {
@@ -208,7 +213,6 @@ function CreatePage() {
     }
   };
 
-  // Управление объявлениями остаётся в кабинете, а создание и редактирование вынесены на отдельную страницу.
   const changePassword = async (event) => {
     event.preventDefault();
     setProfileError("");

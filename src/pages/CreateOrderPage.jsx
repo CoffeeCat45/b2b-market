@@ -15,6 +15,7 @@ function CreateOrderPage() {
   const [form, setForm] = useState(emptyForm);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [cityFocused, setCityFocused] = useState(false);
 
   const editId = searchParams.get("edit");
   const editingOrder = useMemo(() => orders.find((item) => item.id === editId) || null, [orders, editId]);
@@ -124,7 +125,36 @@ function CreateOrderPage() {
                 </datalist>
               </label>
               <label className="field field-wide"><span>Название</span><input name="orderTitle" value={form.title} onChange={(event) => updateField("title", event.target.value)} /></label>
-              <label className="field city-field"><span>Город</span><input name="orderCityMajor" value={form.cityMajor} onChange={(event) => updateField("cityMajor", event.target.value)} placeholder="Город размещения" />{citySuggestions.length ? <div className="field-suggestions">{citySuggestions.map((city) => <button key={city} type="button" className="search-suggestion" onClick={() => updateField("cityMajor", city)}>{city}</button>)}</div> : null}</label>
+              <label className="field city-field">
+                <span>Город</span>
+                <input
+                  name="orderCityMajor"
+                  value={form.cityMajor}
+                  onFocus={() => setCityFocused(true)}
+                  onChange={(event) => updateField("cityMajor", event.target.value)}
+                  onBlur={() => setCityFocused(false)}
+                  placeholder="Город размещения"
+                  autoComplete="off"
+                />
+                {cityFocused && citySuggestions.length ? (
+                  <div className="field-suggestions">
+                    {citySuggestions.map((city) => (
+                      <button
+                        key={city}
+                        type="button"
+                        className="search-suggestion"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setCityFocused(false);
+                          updateField("cityMajor", city);
+                        }}
+                      >
+                        {city}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </label>
               <label className="field"><span>Район / пригород</span><input name="orderLocationDetail" value={form.locationDetail} onChange={(event) => updateField("locationDetail", event.target.value)} placeholder="Рыбино или р-н Центральный" /></label>
               <label className="field"><span>Бюджет от</span><input name="orderBudgetFrom" type="number" value={form.budgetFrom} onChange={(event) => updateField("budgetFrom", event.target.value)} /></label>
               <label className="field"><span>Бюджет до</span><input name="orderBudgetTo" type="number" value={form.budgetTo} onChange={(event) => updateField("budgetTo", event.target.value)} /></label>

@@ -6,6 +6,12 @@ import { pool, testConnection } from "./db.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const corsOptions = {
+  origin: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
 
 // Хеширование паролей остаётся настраиваемым, но при плохом env всё равно откатывается к безопасному дефолту.
 const parsedPasswordSaltRounds = Number.parseInt(process.env.BCRYPT_SALT_ROUNDS || "10", 10);
@@ -14,7 +20,8 @@ const PASSWORD_SALT_ROUNDS =
     ? parsedPasswordSaltRounds
     : 10;
 
-app.use(cors());
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "15mb" }));
 
 const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
@@ -446,7 +453,10 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     const specializations = Array.isArray(req.body.specializations)
       ? req.body.specializations.map((item) => String(item || "").trim()).filter(Boolean)
       : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
-    const avatar = normalizeAvatarPayload(req.body);
+    const avatarUrlProvided = Object.prototype.hasOwnProperty.call(req.body, "avatarUrl");
+    const avatar = avatarUrlProvided
+      ? normalizeAvatarPayload(req.body)
+      : { avatarUrl: null, avatarPositionX: Number(req.body.avatarPositionX ?? 50), avatarPositionY: Number(req.body.avatarPositionY ?? 50), avatarScale: Number(req.body.avatarScale ?? 100) };
 
     if (avatar.error) {
       return res.status(400).json({ message: avatar.error });
@@ -493,12 +503,12 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
              description = $6,
              about = $7,
              specializations = $8::jsonb,
-             avatar_url = $9,
-             avatar_position_x = $10,
-             avatar_position_y = $11,
-             avatar_scale = $12
+             avatar_url = CASE WHEN $9 THEN $10 ELSE avatar_url END,
+             avatar_position_x = $11,
+             avatar_position_y = $12,
+             avatar_scale = $13
          WHERE id = $1`,
-        [req.user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations), avatar.avatarUrl, avatar.avatarPositionX, avatar.avatarPositionY, avatar.avatarScale],
+        [req.user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations), avatarUrlProvided, avatar.avatarUrl, avatar.avatarPositionX, avatar.avatarPositionY, avatar.avatarScale],
       );
     }
 

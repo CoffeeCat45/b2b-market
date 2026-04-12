@@ -2660,3 +2660,43 @@ main {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Consistent spacing after inline feedback banners. */
+.error-banner,
+.success-banner {
+  margin: 18px 0 0;
+}
+
+.error-banner + .button,
+.error-banner + .button-block,
+.success-banner + .button,
+.success-banner + .button-block,
+.error-banner + .card-actions,
+.success-banner + .card-actions,
+.error-banner + .modal-actions,
+.success-banner + .modal-actions {
+  margin-top: 14px;
+}
+
+.login-form .error-banner {
+  margin: 8px 0 0;
+}
+
+.login-form .error-banner + .button-block {
+  margin-top: 14px;
+}
+
+.modal-form-grid .error-banner,
+.modal-form-grid .success-banner {
+  margin-top: 4px;
+}
+
+.modal-form-grid .error-banner + .modal-actions,
+.modal-form-grid .success-banner + .modal-actions {
+  margin-top: 6px;
+}
+
+.review-form .error-banner + .success-banner {
+  margin-top: 10px;
+}
