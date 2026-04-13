@@ -23,6 +23,7 @@ const PASSWORD_SALT_ROUNDS =
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "15mb" }));
+app.use(express.text({ type: "text/plain", limit: "15mb" }));
 
 const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const ALLOWED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -128,6 +129,22 @@ async function verifyPassword(storedPassword, providedPassword) {
 
 async function hashPassword(password) {
   return bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
+}
+
+function getRequestToken(req, body = req.body) {
+  const header = req.headers.authorization || "";
+  if (header.startsWith("Bearer ")) return header.slice(7);
+  return String(body?.authToken || "").trim();
+}
+
+function parsePlainJsonPayload(body) {
+  if (typeof body !== "string") return body || {};
+
+  try {
+    return body.trim() ? JSON.parse(body) : {};
+  } catch {
+    return null;
+  }
 }
 
 function normalizeAvatarPayload(body) {
@@ -437,26 +454,31 @@ app.delete("/api/auth/company", authMiddleware, async (req, res) => {
   }
 });
 
-app.put("/api/auth/profile", authMiddleware, async (req, res) => {
+async function updateProfileData(req, res, user, body, token) {
   const client = await pool.connect();
+  let inTransaction = false;
 
   try {
-    const currentPassword = String(req.body.currentPassword || "");
-    const displayName = String(req.body.displayName || "").trim();
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const companyName = String(req.body.companyName || "").trim();
-    const city = String(req.body.city || "").trim();
-    const phone = String(req.body.phone || "").trim();
-    const industry = String(req.body.industry || "").trim();
-    const description = String(req.body.description || "").trim();
-    const about = String(req.body.about || "").trim();
-    const specializations = Array.isArray(req.body.specializations)
-      ? req.body.specializations.map((item) => String(item || "").trim()).filter(Boolean)
-      : String(req.body.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
-    const avatarUrlProvided = Object.prototype.hasOwnProperty.call(req.body, "avatarUrl");
-    const avatar = avatarUrlProvided
-      ? normalizeAvatarPayload(req.body)
-      : { avatarUrl: null, avatarPositionX: Number(req.body.avatarPositionX ?? 50), avatarPositionY: Number(req.body.avatarPositionY ?? 50), avatarScale: Number(req.body.avatarScale ?? 100) };
+    const profileBody = body || {};
+    const currentPassword = String(profileBody.currentPassword || "");
+    const displayName = String(profileBody.displayName || "").trim();
+    const email = String(profileBody.email || "").trim().toLowerCase();
+    const companyName = String(profileBody.companyName || "").trim();
+    const city = String(profileBody.city || "").trim();
+    const phone = String(profileBody.phone || "").trim();
+    const industry = String(profileBody.industry || "").trim();
+    const description = String(profileBody.description || "").trim();
+    const about = String(profileBody.about || "").trim();
+    const specializations = Array.isArray(profileBody.specializations)
+      ? profileBody.specializations.map((item) => String(item || "").trim()).filter(Boolean)
+      : String(profileBody.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
+    const avatarUrlProvided = Object.prototype.hasOwnProperty.call(profileBody, "avatarUrl");
+    const avatar = normalizeAvatarPayload({
+      avatarUrl: avatarUrlProvided ? profileBody.avatarUrl : "",
+      avatarPositionX: profileBody.avatarPositionX,
+      avatarPositionY: profileBody.avatarPositionY,
+      avatarScale: profileBody.avatarScale,
+    });
 
     if (avatar.error) {
       return res.status(400).json({ message: avatar.error });
@@ -470,7 +492,7 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "Укажите корректный email." });
     }
 
-    const userResult = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
+    const userResult = await client.query("SELECT password FROM users WHERE id = $1", [user.id]);
     const storedPassword = userResult.rows[0]?.password || "";
     const passwordOk = await verifyPassword(storedPassword, currentPassword);
 
@@ -479,18 +501,21 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
     }
 
     await client.query("BEGIN");
+    inTransaction = true;
 
-    const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, req.user.id]);
+    const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, user.id]);
     if (existingUser.rows[0]) {
       await client.query("ROLLBACK");
+      inTransaction = false;
       return res.status(409).json({ message: "Пользователь с таким email уже существует." });
     }
 
-    await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [req.user.id, displayName, email]);
+    await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [user.id, displayName, email]);
 
-    if (req.user.companyId) {
+    if (user.companyId) {
       if (!companyName || !city || !industry || !description || !about) {
         await client.query("ROLLBACK");
+        inTransaction = false;
         return res.status(400).json({ message: "Заполните название компании, город, отрасль, описание и блок О компании." });
       }
 
@@ -508,19 +533,50 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
              avatar_position_y = $12,
              avatar_scale = $13
          WHERE id = $1`,
-        [req.user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations), avatarUrlProvided, avatar.avatarUrl, avatar.avatarPositionX, avatar.avatarPositionY, avatar.avatarScale],
+        [user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations), avatarUrlProvided, avatar.avatarUrl, avatar.avatarPositionX, avatar.avatarPositionY, avatar.avatarScale],
       );
     }
 
     await client.query("COMMIT");
+    inTransaction = false;
 
-    const refreshed = await getUserByToken((req.headers.authorization || "").startsWith("Bearer ") ? (req.headers.authorization || "").slice(7) : null);
+    const refreshed = await getUserByToken(token);
     res.json({ ok: true, user: refreshed });
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (inTransaction) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+    }
     res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
   } finally {
     client.release();
+  }
+}
+
+app.put("/api/auth/profile", authMiddleware, async (req, res) => {
+  await updateProfileData(req, res, req.user, req.body, getRequestToken(req));
+});
+
+app.post("/api/auth/profile", async (req, res) => {
+  try {
+    const body = parsePlainJsonPayload(req.body);
+
+    if (!body) {
+      return res.status(400).json({ message: "Некорректный формат данных профиля." });
+    }
+
+    const token = getRequestToken(req, body);
+    const user = await getUserByToken(token);
+
+    if (!user) {
+      return res.status(401).json({ message: "Требуется авторизация." });
+    }
+
+    await updateProfileData(req, res, user, body, token);
+  } catch (error) {
+    res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
   }
 });
 

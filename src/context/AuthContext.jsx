@@ -35,7 +35,7 @@ export function AuthProvider({ children }) {
 
     const cachedUser = readCachedUser();
 
-    apiFetch("/auth/me", { retries: 1 })
+    apiFetch("/auth/me", { retries: 2 })
       .then((data) => {
         setUser(data.user);
         writeCachedUser(data.user);
@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const data = await apiFetch("/auth/login", {
       method: "POST",
-      retries: 1,
+      retries: 2,
       body: JSON.stringify({ email, password }),
     });
 

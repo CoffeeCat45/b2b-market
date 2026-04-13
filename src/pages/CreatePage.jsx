@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Navigate, Link, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
-import { apiFetch } from "../lib/api";
+import { apiFetch, apiPlainPost } from "../lib/api";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 
@@ -158,23 +158,16 @@ function CreatePage() {
 
   const updatePasswordField = (field, value) => setPasswordForm((current) => ({ ...current, [field]: value }));
 
-  const verifyProfilePassword = async (event) => {
+  const verifyProfilePassword = (event) => {
     event.preventDefault();
     setProfileError("");
-    setProfileLoading(true);
 
-    try {
-      await apiFetch("/auth/verify-password", {
-        method: "POST",
-        retries: 1,
-        body: JSON.stringify({ password: profilePassword }),
-      });
-      setProfileStep("edit");
-    } catch (verifyError) {
-      setProfileError(verifyError.message);
-    } finally {
-      setProfileLoading(false);
+    if (!profilePassword.trim()) {
+      setProfileError("Введите пароль от текущего аккаунта.");
+      return;
     }
+
+    setProfileStep("edit");
   };
 
   const saveProfile = async (event) => {
@@ -184,10 +177,9 @@ function CreatePage() {
 
     try {
       const avatarChanged = profileForm.avatarUrl !== initialAvatarUrl;
-      const data = await apiFetch("/auth/profile", {
-        method: "PUT",
-        retries: 1,
-        body: JSON.stringify({
+      const data = await apiPlainPost(
+        "/auth/profile",
+        {
           currentPassword: profilePassword,
           displayName: profileForm.displayName,
           email: profileForm.email,
@@ -202,14 +194,17 @@ function CreatePage() {
           avatarPositionX: profileForm.avatarPositionX,
           avatarPositionY: profileForm.avatarPositionY,
           avatarScale: profileForm.avatarScale,
-        }),
-      });
+        },
+        {
+          retries: 4,
+        },
+      );
       updateUser(data.user);
       setStatus("Данные компании обновлены.");
       closeProfileModal();
       reload().catch(() => {});
     } catch (saveError) {
-      setProfileError(saveError.message);
+      setProfileError(saveError?.status === 401 ? "Пароль не подошёл для текущего аккаунта. Проверьте email и введите пароль от этого аккаунта." : saveError.message);
     } finally {
       setProfileLoading(false);
     }
@@ -424,6 +419,7 @@ function CreatePage() {
                   <span>Пароль</span>
                   <input name="profilePassword" type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
                 </label>
+                <p className="form-helper">Пароль будет проверен при сохранении данных аккаунта: {user?.email || "email не определён"}.</p>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>
