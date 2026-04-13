@@ -15,8 +15,8 @@ export function useMarketplaceData() {
 
     try {
       const [ordersData, suppliersData, companiesData] = await Promise.all([
-        apiFetch("/orders"),
-        apiFetch("/suppliers"),
+        apiFetch("/orders", { skipAuth: true }),
+        apiFetch("/suppliers", { skipAuth: true }),
         apiFetch("/companies"),
       ]);
 

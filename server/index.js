@@ -147,6 +147,18 @@ function parsePlainJsonPayload(body) {
   }
 }
 
+function hasBrokenEncodingValue(value) {
+  if (typeof value === "string") {
+    return value.includes(String.fromCharCode(0xfffd)) || /\?{3,}/u.test(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasBrokenEncodingValue(item));
+  }
+
+  return false;
+}
+
 function normalizeAvatarPayload(body) {
   const avatarUrl = String(body.avatarUrl || "").trim();
   const avatarPositionX = Number(body.avatarPositionX ?? 50);
@@ -200,7 +212,7 @@ function normalizeLifecycleStatus(status) {
   return "negotiation";
 }
 
-// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.\
+// Хелперы чатов нормализуют legacy-статусы и переиспользуют проверки ролей между endpoint-ами.
 async function getChatForUser(chatId, user) {
   const result = await pool.query(
     `SELECT id, company_a_id AS "companyAId", company_b_id AS "companyBId", CASE WHEN $3 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = chats.id AND archive_state.company_id = $3) END AS "isArchived", lifecycle_status AS "lifecycleStatus", pending_status AS "pendingStatus", pending_status_requested_by_company_id AS "pendingStatusRequestedByCompanyId"
@@ -483,6 +495,10 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
       avatarPositionY: profileBody.avatarPositionY,
       avatarScale: profileBody.avatarScale,
     });
+
+    if (hasBrokenEncodingValue([displayName, companyName, city, industry, description, about, specializations])) {
+      return res.status(400).json({ message: "Данные выглядят как сломанная кодировка. Обновите страницу и введите текст заново." });
+    }
 
     if (avatar.error) {
       return res.status(400).json({ message: avatar.error });
@@ -1213,16 +1229,3 @@ app.get("/api/suppliers", async (_req, res) => {
 });
 
 app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
-
-
-
-
-
-
-
-
-
-
-
-
-

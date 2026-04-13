@@ -692,7 +692,7 @@ function ChatsPage() {
                       </button>
                     ) : statusControl}
                   </div>
-{selectedChat.orderId ? (
+                  {selectedChat.orderId ? (
                     <div className="chat-order-strip">
                       <Link to={`/listing/${selectedChat.orderId}`} className="chat-order-link">Перейти в объявление</Link>
                     </div>
@@ -771,7 +771,8 @@ function ChatsPage() {
                       <h2>Условия</h2>
                       {statusControl}
                     </div>
-                  ) : null}<div className="chat-details-block">
+                  ) : null}
+                  <div className="chat-details-block">
                     <h3>Что запросили</h3>
                     <div className="chat-details-preview">{formatRequested(selectedChat)}</div>
                   </div>
@@ -831,9 +832,3 @@ function ChatsPage() {
 }
 
 export default ChatsPage;
-
-
-
-
-
-

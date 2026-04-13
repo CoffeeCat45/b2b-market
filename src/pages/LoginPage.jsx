@@ -22,7 +22,7 @@ function LoginPage() {
 
   // Подсказки отраслей берём из существующих компаний/поставщиков/заказов, но поле остаётся свободным.
   useEffect(() => {
-    apiFetch("/industries")
+    apiFetch("/industries", { skipAuth: true })
       .then((data) => setIndustryOptions(Array.isArray(data.industries) ? data.industries : []))
       .catch(() => setIndustryOptions([]));
   }, []);

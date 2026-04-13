@@ -16,6 +16,13 @@ function HomePage() {
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
   const featuredOrders = useMemo(() => orders.slice(0, 6), [orders]);
   const featuredSuppliers = useMemo(() => suppliers.slice(0, 3), [suppliers]);
+  const freshSuppliers = useMemo(() => {
+    const sortedSuppliers = [...suppliers].sort((a, b) => (
+      (parseRussianDate(b.createdAt)?.getTime() || 0) - (parseRussianDate(a.createdAt)?.getTime() || 0)
+    ));
+
+    return sortedSuppliers.slice(0, 5);
+  }, [suppliers]);
   const focusOrder = useMemo(() => {
     const freshestOrders = [...orders]
       .sort((a, b) => (parseRussianDate(b.date)?.getTime() || 0) - (parseRussianDate(a.date)?.getTime() || 0))
@@ -25,6 +32,10 @@ function HomePage() {
 
     return freshestOrders[Math.floor(Math.random() * freshestOrders.length)];
   }, [orders]);
+  const focusSupplier = useMemo(() => {
+    if (!freshSuppliers.length) return null;
+    return freshSuppliers[Math.floor(Math.random() * freshSuppliers.length)];
+  }, [freshSuppliers]);
 
   const handleSearch = (event) => {
     event.preventDefault();
@@ -47,8 +58,8 @@ function HomePage() {
   };
 
   const openFeaturedSupplier = () => {
-    if (featuredSuppliers[0]?.companyId) {
-      navigate(`/company/${featuredSuppliers[0].companyId}`);
+    if (focusSupplier?.companyId) {
+      navigate(`/company/${focusSupplier.companyId}`);
     } else {
       navigate("/suppliers");
     }
@@ -102,8 +113,8 @@ function HomePage() {
             </button>
             <button type="button" className="hero-panel-card alternate card-clickable" onClick={openFeaturedSupplier}>
               <p>Новый поставщик</p>
-              <strong>{featuredSuppliers[0]?.name || "Проверенные поставщики"}</strong>
-              <span>{featuredSuppliers[0]?.summary || "Компании для B2B-сотрудничества и переговоров."}</span>
+              <strong>{focusSupplier?.name || "Проверенные поставщики"}</strong>
+              <span>{focusSupplier?.summary || "Компании для B2B-сотрудничества и переговоров."}</span>
             </button>
           </div>
         </div>
