@@ -2,6 +2,23 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 const AuthContext = createContext(null);
+const AUTH_USER_CACHE_KEY = "auth_user_cache";
+
+function readCachedUser() {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_USER_CACHE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(nextUser) {
+  if (nextUser) {
+    localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(nextUser));
+  } else {
+    localStorage.removeItem(AUTH_USER_CACHE_KEY);
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -16,11 +33,22 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    apiFetch("/auth/me")
-      .then((data) => setUser(data.user))
-      .catch(() => {
-        localStorage.removeItem("auth_token");
-        setUser(null);
+    const cachedUser = readCachedUser();
+
+    apiFetch("/auth/me", { retries: 1 })
+      .then((data) => {
+        setUser(data.user);
+        writeCachedUser(data.user);
+      })
+      .catch((authError) => {
+        if (authError?.status === 401 || authError?.status === 403) {
+          localStorage.removeItem("auth_token");
+          writeCachedUser(null);
+          setUser(null);
+          return;
+        }
+
+        setUser(cachedUser);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -28,10 +56,12 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const data = await apiFetch("/auth/login", {
       method: "POST",
+      retries: 1,
       body: JSON.stringify({ email, password }),
     });
 
     localStorage.setItem("auth_token", data.token);
+    writeCachedUser(data.user);
     setUser(data.user);
     return data.user;
   };
@@ -43,13 +73,18 @@ export function AuthProvider({ children }) {
     });
 
     localStorage.setItem("auth_token", data.token);
+    writeCachedUser(data.user);
     setUser(data.user);
     return data.user;
   };
 
   // Даёт экранам профиля обновлять текущего пользователя локально после ответа бэкенда без лишнего auth/me.
   const updateUser = (nextUser) => {
-    setUser((current) => (typeof nextUser === "function" ? nextUser(current) : nextUser));
+    setUser((current) => {
+      const resolvedUser = typeof nextUser === "function" ? nextUser(current) : nextUser;
+      writeCachedUser(resolvedUser);
+      return resolvedUser;
+    });
   };
 
   const logout = async () => {
@@ -58,6 +93,7 @@ export function AuthProvider({ children }) {
     } catch {
     } finally {
       localStorage.removeItem("auth_token");
+      writeCachedUser(null);
       setUser(null);
     }
   };

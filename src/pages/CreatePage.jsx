@@ -166,6 +166,7 @@ function CreatePage() {
     try {
       await apiFetch("/auth/verify-password", {
         method: "POST",
+        retries: 1,
         body: JSON.stringify({ password: profilePassword }),
       });
       setProfileStep("edit");
@@ -185,6 +186,7 @@ function CreatePage() {
       const avatarChanged = profileForm.avatarUrl !== initialAvatarUrl;
       const data = await apiFetch("/auth/profile", {
         method: "PUT",
+        retries: 1,
         body: JSON.stringify({
           currentPassword: profilePassword,
           displayName: profileForm.displayName,
