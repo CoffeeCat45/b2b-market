@@ -30,9 +30,9 @@ const ALLOWED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_AVATAR_DATA_URL_LENGTH = 2_500_000;
 
 // Хелперы сессий и авторизации.
-async function getUserByToken(token) {
+async function getUserByToken(token, queryClient = pool) {
   if (!token) return null;
-  const result = await pool.query(
+  const result = await queryClient.query(
     `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale"
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -454,11 +454,15 @@ app.delete("/api/auth/company", authMiddleware, async (req, res) => {
   }
 });
 
-async function updateProfileData(req, res, user, body, token) {
-  const client = await pool.connect();
+async function updateProfileData(req, res, user, body, token, sharedClient = null) {
+  let client = sharedClient;
+  const shouldReleaseClient = !sharedClient;
   let inTransaction = false;
 
   try {
+    if (!client) {
+      client = await pool.connect();
+    }
     const profileBody = body || {};
     const currentPassword = String(profileBody.currentPassword || "");
     const displayName = String(profileBody.displayName || "").trim();
@@ -502,6 +506,8 @@ async function updateProfileData(req, res, user, body, token) {
 
     await client.query("BEGIN");
     inTransaction = true;
+    await client.query("SET LOCAL lock_timeout = '3000ms'");
+    await client.query("SET LOCAL statement_timeout = '8000ms'");
 
     const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, user.id]);
     if (existingUser.rows[0]) {
@@ -540,10 +546,10 @@ async function updateProfileData(req, res, user, body, token) {
     await client.query("COMMIT");
     inTransaction = false;
 
-    const refreshed = await getUserByToken(token);
+    const refreshed = await getUserByToken(token, client);
     res.json({ ok: true, user: refreshed });
   } catch (error) {
-    if (inTransaction) {
+    if (inTransaction && client) {
       try {
         await client.query("ROLLBACK");
       } catch {
@@ -551,7 +557,9 @@ async function updateProfileData(req, res, user, body, token) {
     }
     res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
   } finally {
-    client.release();
+    if (shouldReleaseClient && client) {
+      client.release();
+    }
   }
 }
 
@@ -560,7 +568,10 @@ app.put("/api/auth/profile", authMiddleware, async (req, res) => {
 });
 
 app.post("/api/auth/profile", async (req, res) => {
+  let client;
+
   try {
+    client = await pool.connect();
     const body = parsePlainJsonPayload(req.body);
 
     if (!body) {
@@ -568,15 +579,19 @@ app.post("/api/auth/profile", async (req, res) => {
     }
 
     const token = getRequestToken(req, body);
-    const user = await getUserByToken(token);
+    const user = await getUserByToken(token, client);
 
     if (!user) {
       return res.status(401).json({ message: "Требуется авторизация." });
     }
 
-    await updateProfileData(req, res, user, body, token);
+    await updateProfileData(req, res, user, body, token, client);
   } catch (error) {
     res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 });
 

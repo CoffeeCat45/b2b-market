@@ -196,7 +196,8 @@ function CreatePage() {
           avatarScale: profileForm.avatarScale,
         },
         {
-          retries: 4,
+          retries: 2,
+          timeoutMs: 8000,
         },
       );
       updateUser(data.user);

@@ -8,10 +8,10 @@ function wait(ms) {
 }
 
 export async function apiFetch(path, options = {}) {
-  const { retries = 0, skipAuth = false, ...fetchOptions } = options;
+  const { retries = 0, skipAuth = false, timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
   const token = localStorage.getItem("auth_token");
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   const headers = {
     "Content-Type": "application/json",
     ...(fetchOptions.headers || {}),
@@ -44,7 +44,7 @@ export async function apiFetch(path, options = {}) {
     if (retries > 0 && (error?.name === "AbortError" || error instanceof TypeError)) {
       window.clearTimeout(timeoutId);
       await wait(RETRY_DELAY_MS);
-      return apiFetch(path, { ...fetchOptions, skipAuth, retries: retries - 1 });
+      return apiFetch(path, { ...fetchOptions, skipAuth, timeoutMs, retries: retries - 1 });
     }
 
     if (error?.name === "AbortError") {
@@ -68,6 +68,7 @@ export function apiPlainPost(path, payload, options = {}) {
     method: "POST",
     skipAuth: true,
     retries: options.retries || 0,
+    timeoutMs: options.timeoutMs || API_TIMEOUT_MS,
     headers: { "Content-Type": "text/plain" },
     body: JSON.stringify({ ...payload, authToken: token }),
   });

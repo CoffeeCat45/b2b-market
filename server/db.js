@@ -45,7 +45,10 @@ const poolConfig = connectionString
       connectionString,
       ssl: shouldUseSsl(rawConnectionString) ? { rejectUnauthorized: false } : false,
       max,
+      connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 10000,
+      query_timeout: 10000,
+      statement_timeout: 10000,
     }
   : {
       host: process.env.PGHOST || "localhost",
@@ -54,7 +57,10 @@ const poolConfig = connectionString
       password: process.env.PGPASSWORD || "",
       database: process.env.PGDATABASE || "b2b_market",
       max,
+      connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 10000,
+      query_timeout: 10000,
+      statement_timeout: 10000,
     };
 
 export const pool = new Pool(poolConfig);
