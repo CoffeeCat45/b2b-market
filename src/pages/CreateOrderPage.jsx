@@ -1,25 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
+import { LIMITS, validateOrderPayload } from "../../shared/validation.js";
 
 const emptyForm = { title: "", category: "", cityMajor: "", locationDetail: "", budgetFrom: "", budgetTo: "", summary: "", description: "", terms: "", tags: "", companyId: "" };
 
+function FieldError({ message }) {
+  return message ? <span className="field-error">{message}</span> : null;
+}
+
 function CreateOrderPage() {
   const { user, loading } = useAuth();
-  const { orders, companies, reload } = useMarketplaceData();
+  const { orders, companies, loading: dataLoading, error: dataError, reload } = useMarketplaceData();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState(emptyForm);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const [cityFocused, setCityFocused] = useState(false);
 
   const editId = searchParams.get("edit");
   const editingOrder = useMemo(() => orders.find((item) => item.id === editId) || null, [orders, editId]);
-  const isEditing = Boolean(editId && editingOrder);
+  const isEditing = Boolean(editId);
   const categorySuggestions = useMemo(
     () => [...new Set(orders.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
     [orders],
@@ -36,7 +44,7 @@ function CreateOrderPage() {
 
   // Синхронизируем форму либо из редактируемого объявления, либо из дефолтов текущей компании.
   useEffect(() => {
-    if (!user) return;
+    if (!user || (editId && !editingOrder)) return;
 
     if (editingOrder) {
       setForm({
@@ -44,29 +52,48 @@ function CreateOrderPage() {
         category: editingOrder.category,
         cityMajor: editingOrder.cityMajor || editingOrder.city,
         locationDetail: editingOrder.locationDetail || "",
-        budgetFrom: String(editingOrder.budgetFrom),
-        budgetTo: String(editingOrder.budgetTo),
+        budgetFrom: String(editingOrder.budgetFrom ?? ""),
+        budgetTo: String(editingOrder.budgetTo ?? ""),
         summary: editingOrder.summary,
         description: editingOrder.description,
         terms: editingOrder.terms,
-        tags: editingOrder.tags.join(", "),
+        tags: Array.isArray(editingOrder.tags) ? editingOrder.tags.join(", ") : String(editingOrder.tags || ""),
         companyId: editingOrder.companyId,
       });
       return;
     }
 
     setForm({ ...emptyForm, companyId: user.role === "admin" ? "" : user.companyId || "" });
-  }, [editingOrder, user]);
+  }, [editingOrder, editId, user]);
 
   // Один submit-обработчик покрывает и создание, и редактирование, чтобы payload в API оставался единым.
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (submitting || dataLoading) return;
+
     setError("");
     setStatus("");
+    setFieldErrors({});
+
+    const payload = { ...form, tags: form.tags };
+
+    if (user.role === "admin" && !payload.companyId) {
+      setFieldErrors({ companyId: "Выберите компанию." });
+      setError("Выберите компанию для объявления.");
+      return;
+    }
+
+    const validation = validateOrderPayload(payload);
+    if (!validation.ok) {
+      setFieldErrors(validation.fields);
+      setError(validation.message);
+      return;
+    }
+
+    setSubmitting(true);
 
     try {
-      const payload = { ...form, tags: form.tags };
-      if (isEditing) {
+      if (editingOrder) {
         await apiFetch(`/orders/${editingOrder.id}`, { method: "PUT", body: JSON.stringify(payload) });
         setStatus("Объявление обновлено.");
       } else {
@@ -77,12 +104,44 @@ function CreateOrderPage() {
       navigate("/create", { replace: true });
     } catch (submitError) {
       setError(submitError.message);
+      if (submitError.fields) setFieldErrors(submitError.fields);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  if (loading) return null;
-  if (!user) return <Navigate to="/login" replace />;
-  if (editId && !editingOrder && orders.length) return <Navigate to="/create" replace />;
+  if (loading || dataLoading) return null;
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
+
+  if (editId && !editingOrder) {
+    return (
+      <Layout>
+        <section className="form-section">
+          <div className="container dashboard-main-only">
+            <div className="card empty-state-card">
+              <h1>{dataError ? "Не удалось загрузить объявление" : "Объявление не найдено"}</h1>
+              <p className="muted">
+                {dataError
+                  ? dataError
+                  : "Возможно, его удалили или ссылка устарела. Вернитесь в кабинет и выберите объявление из списка."}
+              </p>
+              <div className="card-actions">
+                {dataError ? (
+                  <button type="button" className="button button-primary" onClick={() => reload()}>
+                    Повторить
+                  </button>
+                ) : null}
+                <Link to="/create" className="button button-secondary">Вернуться в кабинет</Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -102,7 +161,14 @@ function CreateOrderPage() {
             </div>
           </div>
 
-          <form className="card listing-form" onSubmit={handleSubmit}>
+          {dataError ? (
+            <div className="error-banner">
+              {dataError}{" "}
+              <button type="button" className="button button-ghost" onClick={() => reload()}>Повторить</button>
+            </div>
+          ) : null}
+
+          <form className="card listing-form" onSubmit={handleSubmit} noValidate>
             <div className="form-intro">
               <h2>{isEditing ? "Форма редактирования объявления" : "Форма создания объявления"}</h2>
               <p>{isEditing ? "Обновите данные текущего объявления и сохраните изменения." : "Заполните карточку, чтобы опубликовать новое объявление в каталоге."}</p>
@@ -111,24 +177,48 @@ function CreateOrderPage() {
               {user.role === "admin" ? (
                 <label className="field field-type">
                   <span>Компания</span>
-                  <select name="orderCompanyId" value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}>
+                  <select name="orderCompanyId" required value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}>
                     <option value="">Выберите компанию</option>
                     {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
                   </select>
+                  <FieldError message={fieldErrors.companyId} />
                 </label>
               ) : null}
               <label className="field">
                 <span>Категория</span>
-                <input name="orderCategory" list="order-category-options" value={form.category} onChange={(event) => updateField("category", event.target.value)} />
+                <input
+                  name="orderCategory"
+                  list="order-category-options"
+                  required
+                  minLength={LIMITS.order.categoryMin}
+                  maxLength={LIMITS.order.categoryMax}
+                  value={form.category}
+                  onChange={(event) => updateField("category", event.target.value)}
+                />
                 <datalist id="order-category-options">
                   {categorySuggestions.map((category) => <option key={category} value={category} />)}
                 </datalist>
+                <FieldError message={fieldErrors.category} />
               </label>
-              <label className="field field-wide"><span>Название</span><input name="orderTitle" value={form.title} onChange={(event) => updateField("title", event.target.value)} /></label>
+              <label className="field field-wide">
+                <span>Название</span>
+                <input
+                  name="orderTitle"
+                  required
+                  minLength={LIMITS.order.titleMin}
+                  maxLength={LIMITS.order.titleMax}
+                  value={form.title}
+                  onChange={(event) => updateField("title", event.target.value)}
+                />
+                <FieldError message={fieldErrors.title} />
+              </label>
               <label className="field city-field">
                 <span>Город</span>
                 <input
                   name="orderCityMajor"
+                  required
+                  minLength={LIMITS.order.cityMin}
+                  maxLength={LIMITS.order.cityMax}
                   value={form.cityMajor}
                   onFocus={() => setCityFocused(true)}
                   onChange={(event) => updateField("cityMajor", event.target.value)}
@@ -154,19 +244,103 @@ function CreateOrderPage() {
                     ))}
                   </div>
                 ) : null}
+                <FieldError message={fieldErrors.cityMajor} />
               </label>
-              <label className="field"><span>Район / пригород</span><input name="orderLocationDetail" value={form.locationDetail} onChange={(event) => updateField("locationDetail", event.target.value)} placeholder="Рыбино или р-н Центральный" /></label>
-              <label className="field"><span>Бюджет от</span><input name="orderBudgetFrom" type="number" value={form.budgetFrom} onChange={(event) => updateField("budgetFrom", event.target.value)} /></label>
-              <label className="field"><span>Бюджет до</span><input name="orderBudgetTo" type="number" value={form.budgetTo} onChange={(event) => updateField("budgetTo", event.target.value)} /></label>
-              <label className="field field-wide"><span>Краткое описание</span><input name="orderSummary" value={form.summary} onChange={(event) => updateField("summary", event.target.value)} /></label>
-              <label className="field field-wide"><span>Полное описание</span><textarea name="orderDescription" rows="6" value={form.description} onChange={(event) => updateField("description", event.target.value)} /></label>
-              <label className="field field-wide"><span>Условия сотрудничества</span><textarea name="orderTerms" rows="4" value={form.terms} onChange={(event) => updateField("terms", event.target.value)} /></label>
-              <label className="field field-wide"><span>Теги</span><input name="orderTags" value={form.tags} onChange={(event) => updateField("tags", event.target.value)} placeholder="B2B, поставка, опт" /></label>
+              <label className="field">
+                <span>Район / пригород</span>
+                <input
+                  name="orderLocationDetail"
+                  maxLength={LIMITS.order.locationMax}
+                  value={form.locationDetail}
+                  onChange={(event) => updateField("locationDetail", event.target.value)}
+                  placeholder="Рыбино или р-н Центральный"
+                />
+                <FieldError message={fieldErrors.locationDetail} />
+              </label>
+              <label className="field">
+                <span>Бюджет от</span>
+                <input
+                  name="orderBudgetFrom"
+                  type="number"
+                  min="0"
+                  step="1"
+                  max={LIMITS.order.budgetMax}
+                  value={form.budgetFrom}
+                  onChange={(event) => updateField("budgetFrom", event.target.value)}
+                  placeholder="Пусто — по договорённости"
+                />
+                <FieldError message={fieldErrors.budgetFrom} />
+              </label>
+              <label className="field">
+                <span>Бюджет до</span>
+                <input
+                  name="orderBudgetTo"
+                  type="number"
+                  min="0"
+                  step="1"
+                  max={LIMITS.order.budgetMax}
+                  value={form.budgetTo}
+                  onChange={(event) => updateField("budgetTo", event.target.value)}
+                  placeholder="Пусто — по договорённости"
+                />
+                <FieldError message={fieldErrors.budgetTo} />
+              </label>
+              <label className="field field-wide">
+                <span>Краткое описание</span>
+                <input
+                  name="orderSummary"
+                  required
+                  minLength={LIMITS.order.summaryMin}
+                  maxLength={LIMITS.order.summaryMax}
+                  value={form.summary}
+                  onChange={(event) => updateField("summary", event.target.value)}
+                />
+                <FieldError message={fieldErrors.summary} />
+              </label>
+              <label className="field field-wide">
+                <span>Полное описание</span>
+                <textarea
+                  name="orderDescription"
+                  rows="6"
+                  required
+                  minLength={LIMITS.order.descriptionMin}
+                  maxLength={LIMITS.order.descriptionMax}
+                  value={form.description}
+                  onChange={(event) => updateField("description", event.target.value)}
+                />
+                <FieldError message={fieldErrors.description} />
+              </label>
+              <label className="field field-wide">
+                <span>Условия сотрудничества</span>
+                <textarea
+                  name="orderTerms"
+                  rows="4"
+                  required
+                  minLength={LIMITS.order.termsMin}
+                  maxLength={LIMITS.order.termsMax}
+                  value={form.terms}
+                  onChange={(event) => updateField("terms", event.target.value)}
+                />
+                <FieldError message={fieldErrors.terms} />
+              </label>
+              <label className="field field-wide">
+                <span>Теги</span>
+                <input
+                  name="orderTags"
+                  maxLength={LIMITS.order.tagsMax * (LIMITS.order.tagMax + 2)}
+                  value={form.tags}
+                  onChange={(event) => updateField("tags", event.target.value)}
+                  placeholder="B2B, поставка, опт"
+                />
+                <FieldError message={fieldErrors.tags} />
+              </label>
             </div>
             {error ? <div className="error-banner">{error}</div> : null}
             {status ? <div className="success-banner">{status}</div> : null}
             <div className="card-actions">
-              <button type="submit" className="button button-primary">{isEditing ? "Сохранить" : "Опубликовать"}</button>
+              <button type="submit" className="button button-primary" disabled={submitting || dataLoading}>
+                {submitting ? "Сохранение..." : isEditing ? "Сохранить" : "Опубликовать"}
+              </button>
               <Link to="/create" className="button button-secondary">Отмена</Link>
             </div>
           </form>
@@ -177,4 +351,3 @@ function CreateOrderPage() {
 }
 
 export default CreateOrderPage;
-

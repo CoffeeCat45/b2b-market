@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
 
 const AuthContext = createContext(null);
@@ -23,6 +24,21 @@ function writeCachedUser(nextUser) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const handleExpired = () => {
+      setUser(null);
+      writeCachedUser(null);
+      if (location.pathname === "/login") return;
+      const next = `${location.pathname}${location.search}`;
+      navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true });
+    };
+
+    window.addEventListener("auth:expired", handleExpired);
+    return () => window.removeEventListener("auth:expired", handleExpired);
+  }, [location.pathname, location.search, navigate]);
 
   // Восстанавливаем активную сессию при старте приложения, чтобы protected-маршруты рендерились предсказуемо.
   useEffect(() => {

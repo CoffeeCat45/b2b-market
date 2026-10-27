@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
+import { LIMITS, validateAttachments } from "../../shared/validation.js";
 
-const ACCEPTED_FILES = ["application/pdf", "image/jpeg", "image/png"];
+const MIB = 1024 * 1024;
 const CHAT_STATUS_OPTIONS = [
   { value: "negotiation", label: "В переговорах" },
   { value: "closed", label: "Закрыто" },
@@ -116,6 +117,7 @@ function DetailsIcon() {
 
 function ChatsPage() {
   const { user, loading } = useAuth();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(searchParams.get("chatId") || null);
@@ -126,6 +128,8 @@ function ChatsPage() {
   const [detailsStatus, setDetailsStatus] = useState("");
   const [agreementDraft, setAgreementDraft] = useState("");
   const [offeredDraft, setOfferedDraft] = useState("");
+  const [offeredDirty, setOfferedDirty] = useState(false);
+  const [agreementDirty, setAgreementDirty] = useState(false);
   const [offerModalOpen, setOfferModalOpen] = useState(false);
   const [offerForm, setOfferForm] = useState({ price: "", timeline: "", comment: "" });
   const [contextMenu, setContextMenu] = useState(null);
@@ -249,20 +253,33 @@ function ChatsPage() {
   const selectedChat = chats.find((chat) => chat.id === selectedChatId) || null;
   const baseStatusValue = getChatBaseStatus(selectedChat);
   const currentStatusValue = getChatStatusValue(selectedChat);
+  const isChatClosed = baseStatusValue === "closed";
   const incomingStatusRequest = Boolean(selectedChat?.pendingStatus && user?.companyId && selectedChat.pendingStatusRequestedByCompanyId !== user.companyId);
   const outgoingStatusRequest = Boolean(selectedChat?.pendingStatus && user?.companyId && selectedChat.pendingStatusRequestedByCompanyId === user.companyId);
 
   useEffect(() => {
+    const chat = chats.find((item) => item.id === selectedChatId) || null;
     setMessageDraft("");
     setPendingFiles([]);
     setDetailsStatus("");
-    setAgreementDraft(selectedChat?.agreementDetails || "");
-    setOfferedDraft(selectedChat?.offeredDetails || "");
+    setAgreementDraft(chat?.agreementDetails || "");
+    setOfferedDraft(chat?.offeredDetails || "");
+    setAgreementDirty(false);
+    setOfferedDirty(false);
     setOfferModalOpen(false);
     setOfferForm({ price: "", timeline: "", comment: "" });
     setContextMenu(null);
     setDeleteTargetId(null);
-  }, [selectedChatId, selectedChat?.agreementDetails, selectedChat?.offeredDetails]);
+    // Черновики сбрасываются только при смене чата, а не при каждом поллинге.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChatId]);
+
+  // Пока пользователь редактирует поле, фоновое обновление чата не должно затирать его черновик.
+  useEffect(() => {
+    if (!selectedChat) return;
+    if (!offeredDirty) setOfferedDraft(selectedChat.offeredDetails || "");
+    if (!agreementDirty) setAgreementDraft(selectedChat.agreementDetails || "");
+  }, [selectedChat, offeredDirty, agreementDirty]);
 
   useEffect(() => {
     const chatCompany = getIntentParam(searchParams, "chatCompany");
@@ -327,13 +344,12 @@ function ChatsPage() {
     ));
   }, [selectedChat, user]);
 
-  const persistChatDetails = useCallback(async (chatId, nextOfferedDetails, nextAgreementDetails) => {
+  const persistChatDetails = useCallback(async (chatId, changes) => {
+    if (!Object.keys(changes).length) return;
+
     await apiFetch(`/chats/${chatId}/details`, {
       method: "PUT",
-      body: JSON.stringify({
-        offeredDetails: nextOfferedDetails,
-        agreementDetails: nextAgreementDetails,
-      }),
+      body: JSON.stringify(changes),
     });
   }, []);
 
@@ -357,25 +373,64 @@ function ChatsPage() {
 
   const handlePickFiles = async (event) => {
     const files = Array.from(event.target.files || []);
+    event.target.value = "";
     if (!files.length) return;
 
+    if (pendingFiles.length + files.length > LIMITS.files.maxAttachments) {
+      setError(`Можно прикрепить не более ${LIMITS.files.maxAttachments} файлов. Удалите лишние и попробуйте снова.`);
+      return;
+    }
+
+    const pendingBytes = pendingFiles.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+    const selectedBytes = files.reduce((sum, file) => sum + file.size, 0);
+
+    if (pendingBytes + selectedBytes > LIMITS.files.attachmentsTotalMaxBytes) {
+      setError(`Суммарный размер вложений больше ${LIMITS.files.attachmentsTotalMaxBytes / MIB} МБ.`);
+      return;
+    }
+
+    const nextFiles = [];
+    const rejected = [];
+
     try {
-      const supported = files.filter((file) => ACCEPTED_FILES.includes(file.type)).slice(0, 5);
-      const nextFiles = await Promise.all(
-        supported.map(async (file) => ({
+      for (const file of files) {
+        if (!LIMITS.files.allowedAttachmentTypes.includes(file.type)) {
+          rejected.push(`${file.name}: поддерживаются только PDF, JPG и PNG`);
+          continue;
+        }
+
+        if (file.name.length > LIMITS.files.attachmentNameMax) {
+          rejected.push(`${file.name}: имя длиннее ${LIMITS.files.attachmentNameMax} символов`);
+          continue;
+        }
+
+        if (file.size > LIMITS.files.attachmentMaxBytes) {
+          rejected.push(`${file.name}: больше ${LIMITS.files.attachmentMaxBytes / MIB} МБ`);
+          continue;
+        }
+
+        nextFiles.push({
           name: file.name,
           type: file.type,
           size: file.size,
           dataUrl: await readFileAsDataUrl(file),
-        })),
-      );
-      setPendingFiles((current) => [...current, ...nextFiles].slice(0, 5));
-      setError("");
+        });
+      }
     } catch {
       setError("Не удалось подготовить вложения.");
-    } finally {
-      event.target.value = "";
+      return;
     }
+
+    const combined = [...pendingFiles, ...nextFiles];
+    const validation = validateAttachments(combined);
+
+    if (!validation.ok) {
+      setError(validation.error);
+      return;
+    }
+
+    setPendingFiles(combined);
+    setError(rejected.length ? `Не добавлены: ${rejected.join("; ")}.` : "");
   };
 
   const removePendingFile = (index) => {
@@ -424,11 +479,6 @@ function ChatsPage() {
     if (!selectedChat || !user?.companyId || statusBusy) return;
 
     if (nextStatus === "archived") {
-      if (baseStatusValue !== "closed") {
-        setError("Перенести чат в архив можно только после статуса Закрыто.");
-        return;
-      }
-
       try {
         setStatusBusy(true);
         setDetailsStatus("");
@@ -500,13 +550,14 @@ function ChatsPage() {
   };
 
   const sendMessage = async () => {
-    if (!selectedChat) return;
+    if (!selectedChat || isChatClosed) return;
     if (!messageDraft.trim() && pendingFiles.length === 0) return;
 
     try {
-      if (offeredDraft !== (selectedChat.offeredDetails || "") || agreementDraft !== (selectedChat.agreementDetails || "")) {
-        await persistChatDetails(selectedChat.id, offeredDraft, agreementDraft);
-      }
+      const changes = {};
+      if (offeredDraft !== (selectedChat.offeredDetails || "")) changes.offeredDetails = offeredDraft;
+      if (agreementDraft !== (selectedChat.agreementDetails || "")) changes.agreementDetails = agreementDraft;
+      await persistChatDetails(selectedChat.id, changes);
 
       await apiFetch(`/chats/${selectedChat.id}/messages`, {
         method: "POST",
@@ -515,9 +566,11 @@ function ChatsPage() {
       setMessageDraft("");
       setPendingFiles([]);
       setDetailsStatus("");
+      setOfferedDirty(false);
+      setAgreementDirty(false);
       await loadChats();
     } catch (messageError) {
-      setError(messageError.message);
+      setError(messageError.fields ? Object.values(messageError.fields)[0] : messageError.message);
     }
   };
 
@@ -525,7 +578,12 @@ function ChatsPage() {
     if (!selectedChat) return;
 
     try {
-      await persistChatDetails(selectedChat.id, offeredDraft, agreementDraft);
+      const changes = {};
+      if (offeredDraft !== (selectedChat.offeredDetails || "")) changes.offeredDetails = offeredDraft;
+      if (agreementDraft !== (selectedChat.agreementDetails || "")) changes.agreementDetails = agreementDraft;
+      await persistChatDetails(selectedChat.id, changes);
+      setOfferedDirty(false);
+      setAgreementDirty(false);
       setDetailsStatus("Детали чата сохранены.");
       await loadChats();
     } catch (saveError) {
@@ -542,6 +600,7 @@ function ChatsPage() {
     }
 
     setOfferedDraft(nextOfferedDetails);
+    setOfferedDirty(true);
     setDetailsStatus("Предложение подготовлено. Оно сохранится вместе с сообщением или по кнопке ниже.");
     setOfferModalOpen(false);
     setOfferForm({ price: "", timeline: "", comment: "" });
@@ -559,7 +618,7 @@ function ChatsPage() {
           disabled={statusBusy || Boolean(selectedChat?.pendingStatus)}
         >
           {CHAT_STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value} disabled={option.value === "archived" && !selectedChat?.isArchived && baseStatusValue !== "closed"}>
+            <option key={option.value} value={option.value}>
               {option.label}
             </option>
           ))}
@@ -575,7 +634,10 @@ function ChatsPage() {
   const showDetails = !isMobileLayout || mobileView === "details";
 
   if (loading) return null;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
 
   return (
     <Layout>
@@ -653,13 +715,15 @@ function ChatsPage() {
                       >
                         {contextMenu.isArchived ? "Убрать из архива" : "Добавить в архив"}
                       </button>
-                      <button
-                        type="button"
-                        className="chat-context-action chat-context-action-danger"
-                        onClick={() => setDeleteTargetId(contextMenu.chatId)}
-                      >
-                        Удалить чат
-                      </button>
+                      {user.role === "admin" ? (
+                        <button
+                          type="button"
+                          className="chat-context-action chat-context-action-danger"
+                          onClick={() => setDeleteTargetId(contextMenu.chatId)}
+                        >
+                          Удалить чат
+                        </button>
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -730,27 +794,42 @@ function ChatsPage() {
                       <p>Запрос на статус {CHAT_STATUS_LABELS[selectedChat.pendingStatus]} отправлен. Ждём подтверждения второй стороны.</p>
                     </div>
                   ) : null}
-                  <div className="chat-compose-panel">
-                    {pendingFiles.length ? (
-                      <div className="pending-files-row">
-                        {pendingFiles.map((file, index) => (
-                          <button key={`${file.name}-${index}`} type="button" className="pending-file-chip" onClick={() => removePendingFile(index)}>
-                            {file.name} ×
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="chat-compose-row">
-                      <button type="button" className="attach-button" onClick={() => fileInputRef.current?.click()} title="Прикрепить файл">
-                        <FileIcon />
-                      </button>
-                      <input name="chatAttachments" ref={fileInputRef} type="file" accept=".pdf,.jpeg,.jpg,.png" multiple hidden onChange={handlePickFiles} />
-                      <textarea name="chatMessage" ref={messageInputRef} rows="1" value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Напишите сообщение" />
-                      <button type="button" className="send-button" onClick={sendMessage} title="Отправить сообщение" aria-label="Отправить сообщение">
-                        <SendIcon />
-                      </button>
+                  {isChatClosed ? (
+                    <div className="chat-closed-notice">
+                      Переписка закрыта. История доступна, но новые сообщения отправить нельзя.
                     </div>
-                  </div>
+                  ) : (
+                    <div className="chat-compose-panel">
+                      {pendingFiles.length ? (
+                        <div className="pending-files-row">
+                          {pendingFiles.map((file, index) => (
+                            <button key={`${file.name}-${index}`} type="button" className="pending-file-chip" onClick={() => removePendingFile(index)}>
+                              {file.name} ×
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="chat-compose-row">
+                        <button type="button" className="attach-button" onClick={() => fileInputRef.current?.click()} title="Прикрепить файл">
+                          <FileIcon />
+                        </button>
+                        <input name="chatAttachments" ref={fileInputRef} type="file" accept=".pdf,.jpeg,.jpg,.png" multiple hidden onChange={handlePickFiles} />
+                        <textarea
+                          name="chatMessage"
+                          ref={messageInputRef}
+                          rows="1"
+                          maxLength={LIMITS.chat.messageMax}
+                          value={messageDraft}
+                          onChange={(event) => setMessageDraft(event.target.value)}
+                          placeholder="Напишите сообщение"
+                        />
+                        <button type="button" className="send-button" onClick={sendMessage} title="Отправить сообщение" aria-label="Отправить сообщение">
+                          <SendIcon />
+                        </button>
+                      </div>
+                      <span className="field-hint">{messageDraft.length}/{LIMITS.chat.messageMax}</span>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="chat-panel-empty">
@@ -783,7 +862,8 @@ function ChatsPage() {
                   </div>
                   <div className="chat-details-block">
                     <h3>На чём сошлись</h3>
-                    <textarea name="chatAgreementDetails" rows="7" value={agreementDraft} onChange={(event) => setAgreementDraft(event.target.value)} placeholder="Запишите согласованные условия, дедлайны, объёмы и следующий шаг." />
+                    <textarea name="chatAgreementDetails" rows="7" maxLength={LIMITS.chat.detailsMax} value={agreementDraft} onChange={(event) => { setAgreementDraft(event.target.value); setAgreementDirty(true); }} placeholder="Запишите согласованные условия, дедлайны, объёмы и следующий шаг." />
+                    <span className="field-hint">{agreementDraft.length}/{LIMITS.chat.detailsMax}</span>
                   </div>
                   {detailsStatus ? <div className="success-banner">{detailsStatus}</div> : null}
                   <button type="button" className="button button-primary button-block" onClick={saveDetails}>Сохранить детали</button>
@@ -810,15 +890,15 @@ function ChatsPage() {
             </div>
             <div className="field">
               <span>Цена</span>
-              <input name="offerPrice" value={offerForm.price} onChange={(event) => setOfferForm((current) => ({ ...current, price: event.target.value }))} placeholder="Например: от 180 000 ₽" />
+              <input name="offerPrice" maxLength={50} value={offerForm.price} onChange={(event) => setOfferForm((current) => ({ ...current, price: event.target.value }))} placeholder="Например: от 180 000 ₽" />
             </div>
             <div className="field">
               <span>Сроки</span>
-              <input name="offerTimeline" value={offerForm.timeline} onChange={(event) => setOfferForm((current) => ({ ...current, timeline: event.target.value }))} placeholder="Например: 14 рабочих дней" />
+              <input name="offerTimeline" maxLength={100} value={offerForm.timeline} onChange={(event) => setOfferForm((current) => ({ ...current, timeline: event.target.value }))} placeholder="Например: 14 рабочих дней" />
             </div>
             <div className="field">
               <span>Комментарий</span>
-              <textarea name="offerComment" rows="5" value={offerForm.comment} onChange={(event) => setOfferForm((current) => ({ ...current, comment: event.target.value }))} placeholder="Уточните объём, этапы, ограничения или состав поставки." />
+              <textarea name="offerComment" rows="5" maxLength={1000} value={offerForm.comment} onChange={(event) => setOfferForm((current) => ({ ...current, comment: event.target.value }))} placeholder="Уточните объём, этапы, ограничения или состав поставки." />
             </div>
             <div className="modal-actions">
               <button type="button" className="button button-secondary" onClick={() => setOfferModalOpen(false)}>Отмена</button>

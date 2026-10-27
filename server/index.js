@@ -1,17 +1,68 @@
 import crypto from "crypto";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import { pool, testConnection } from "./db.js";
+import { formatDisplayDate } from "../shared/dates.js";
+import {
+  validateArchivePayload,
+  validateChatDetailsPayload,
+  validateChatOpenPayload,
+  validateMessagePayload,
+  validateOrderPayload,
+  validatePassword,
+  validateProfilePayload,
+  validateRegisterPayload,
+  validateReviewPayload,
+  validateStatusRequestPayload,
+  validateStatusResponsePayload,
+} from "../shared/validation.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+
+function readBoundedInt(raw, fallback, min, max) {
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value >= min && value <= max ? value : fallback;
+}
+
+const SESSION_TTL_DAYS = readBoundedInt(process.env.SESSION_TTL_DAYS, 30, 1, 365);
+const LOGIN_RATE_LIMIT_MAX = readBoundedInt(process.env.LOGIN_RATE_LIMIT_MAX, 10, 1, 1000);
+const LOGIN_RATE_LIMIT_WINDOW_MIN = readBoundedInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MIN, 15, 1, 1440);
+const REGISTER_RATE_LIMIT_MAX = readBoundedInt(process.env.REGISTER_RATE_LIMIT_MAX, 5, 1, 1000);
+const REGISTER_RATE_LIMIT_WINDOW_MIN = readBoundedInt(process.env.REGISTER_RATE_LIMIT_WINDOW_MIN, 60, 1, 1440);
+
+const DEFAULT_CORS_ORIGINS = [
+  "https://coffeecat45.github.io",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+];
+
+function readCorsOrigins(raw) {
+  const configured = String(raw || "")
+    .split(",")
+    .map((origin) => origin.trim().replace(/\/$/, ""))
+    .filter((origin) => origin && origin !== "*");
+
+  return new Set(configured.length ? configured : DEFAULT_CORS_ORIGINS);
+}
+
+const allowedCorsOrigins = readCorsOrigins(process.env.CORS_ORIGINS);
 const corsOptions = {
-  origin: true,
+  origin(origin, callback) {
+    callback(null, !origin || allowedCorsOrigins.has(origin));
+  },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 204,
 };
+
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
 // Хеширование паролей остаётся настраиваемым, но при плохом env всё равно откатывается к безопасному дефолту.
 const parsedPasswordSaltRounds = Number.parseInt(process.env.BCRYPT_SALT_ROUNDS || "10", 10);
@@ -20,16 +71,73 @@ const PASSWORD_SALT_ROUNDS =
     ? parsedPasswordSaltRounds
     : 10;
 
+app.use(helmet());
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
-app.use(express.json({ limit: "15mb" }));
-app.use(express.text({ type: "text/plain", limit: "15mb" }));
+app.use(express.json({ limit: "25mb" }));
 
-const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
-const ALLOWED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_AVATAR_DATA_URL_LENGTH = 2_500_000;
+function getBearerToken(req) {
+  const header = req.headers.authorization || "";
+  return header.startsWith("Bearer ") ? header.slice(7) : null;
+}
+
+function isUniqueViolation(error) {
+  return error?.code === "23505";
+}
+
+function sendValidationError(res, result) {
+  return res.status(400).json({ message: result.message, fields: result.fields });
+}
+
+function serverError(res, message, error) {
+  console.error(message, error);
+  return res.status(500).json({ message });
+}
+
+async function writeAuditLog(req, action, { userId = null, companyId = null, details = {} } = {}, queryClient = pool) {
+  try {
+    await queryClient.query(
+      `INSERT INTO audit_log (user_id, company_id, action, ip, details)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [userId, companyId, action, req?.ip || null, JSON.stringify(details)],
+    );
+  } catch (error) {
+    console.error("Не удалось записать audit log.", error);
+  }
+}
+
+function createAuthRateLimiter({ windowMinutes, max, message, skipSuccessfulRequests = false }) {
+  return rateLimit({
+    windowMs: windowMinutes * 60 * 1000,
+    limit: max,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    skipSuccessfulRequests,
+    handler(req, res) {
+      void writeAuditLog(req, "auth.rate_limited", { details: { path: req.path } });
+      res.status(429).json({ message });
+    },
+  });
+}
+
+const loginRateLimiter = createAuthRateLimiter({
+  windowMinutes: LOGIN_RATE_LIMIT_WINDOW_MIN,
+  max: LOGIN_RATE_LIMIT_MAX,
+  message: "Слишком много попыток входа. Попробуйте позже.",
+  skipSuccessfulRequests: true,
+});
+
+const registerRateLimiter = createAuthRateLimiter({
+  windowMinutes: REGISTER_RATE_LIMIT_WINDOW_MIN,
+  max: REGISTER_RATE_LIMIT_MAX,
+  message: "Слишком много попыток регистрации. Попробуйте позже.",
+});
 
 // Хелперы сессий и авторизации.
+function getSessionExpiresAt() {
+  return new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
 async function getUserByToken(token, queryClient = pool) {
   if (!token) return null;
   const result = await queryClient.query(
@@ -37,7 +145,7 @@ async function getUserByToken(token, queryClient = pool) {
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN companies c ON c.id = u.company_id
-     WHERE s.token = $1`,
+     WHERE s.token = $1 AND s.expires_at > NOW()`,
     [token],
   );
   return result.rows[0] ?? null;
@@ -45,20 +153,17 @@ async function getUserByToken(token, queryClient = pool) {
 
 async function authMiddleware(req, res, next) {
   try {
-    const header = req.headers.authorization || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-    const user = await getUserByToken(token);
+    const user = await getUserByToken(getBearerToken(req));
     if (!user) return res.status(401).json({ message: "Требуется авторизация." });
     req.user = user;
     next();
   } catch (error) {
-    res.status(500).json({ message: "Ошибка авторизации.", error: error.message });
+    serverError(res, "Ошибка авторизации.", error);
   }
 }
 
 function optionalAuthMiddleware(req, _res, next) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const token = getBearerToken(req);
 
   if (!token) {
     req.user = null;
@@ -77,42 +182,7 @@ function optionalAuthMiddleware(req, _res, next) {
     });
 }
 
-// Общие payload-mapperы помогают держать frontend и backend в одной валидационной логике.
-function composeLocation(cityMajor, locationDetail) {
-  return locationDetail ? `${cityMajor}, ${locationDetail}` : cityMajor;
-}
-
-function mapOrderPayload(body) {
-  const budgetFrom = Number(body.budgetFrom);
-  const budgetTo = Number(body.budgetTo);
-  const cityMajor = String(body.cityMajor || body.city || "").trim();
-  const locationDetail = String(body.locationDetail || "").trim();
-
-  if (!body.title || !body.category || !cityMajor || !body.summary || !body.description || !body.terms) {
-    return { error: "Заполните все обязательные поля." };
-  }
-
-  if (Number.isNaN(budgetFrom) || Number.isNaN(budgetTo)) {
-    return { error: "Бюджет должен быть числом." };
-  }
-
-  return {
-    title: body.title.trim(),
-    category: body.category.trim(),
-    cityMajor,
-    locationDetail,
-    city: composeLocation(cityMajor, locationDetail),
-    budgetFrom,
-    budgetTo,
-    budgetLabel: `от ${budgetFrom.toLocaleString("ru-RU")} ₽ до ${budgetTo.toLocaleString("ru-RU")} ₽`,
-    summary: body.summary.trim(),
-    description: body.description.trim(),
-    terms: body.terms.trim(),
-    tags: Array.isArray(body.tags) ? body.tags.filter(Boolean) : String(body.tags || "").split(",").map((item) => item.trim()).filter(Boolean),
-    publishedAt: body.date?.trim() || new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }),
-  };
-}
-
+// Хелперы паролей поддерживают как bcrypt-хеши, так и старые plain-text записи.
 function isBcryptHash(value) {
   return typeof value === "string" && /^\$2[aby]\$\d{2}\$/.test(value);
 }
@@ -131,22 +201,6 @@ async function hashPassword(password) {
   return bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
 }
 
-function getRequestToken(req, body = req.body) {
-  const header = req.headers.authorization || "";
-  if (header.startsWith("Bearer ")) return header.slice(7);
-  return String(body?.authToken || "").trim();
-}
-
-function parsePlainJsonPayload(body) {
-  if (typeof body !== "string") return body || {};
-
-  try {
-    return body.trim() ? JSON.parse(body) : {};
-  } catch {
-    return null;
-  }
-}
-
 function hasBrokenEncodingValue(value) {
   if (typeof value === "string") {
     return value.includes(String.fromCharCode(0xfffd)) || /\?{3,}/u.test(value);
@@ -157,45 +211,6 @@ function hasBrokenEncodingValue(value) {
   }
 
   return false;
-}
-
-function normalizeAvatarPayload(body) {
-  const avatarUrl = String(body.avatarUrl || "").trim();
-  const avatarPositionX = Number(body.avatarPositionX ?? 50);
-  const avatarPositionY = Number(body.avatarPositionY ?? 50);
-  const avatarScale = Number(body.avatarScale ?? 100);
-
-  if (avatarUrl) {
-    const match = avatarUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,/i);
-    if (!match || !ALLOWED_AVATAR_TYPES.has(match[1].toLowerCase())) {
-      return { error: "Аватар должен быть изображением JPG, PNG или WebP." };
-    }
-
-    if (avatarUrl.length > MAX_AVATAR_DATA_URL_LENGTH) {
-      return { error: "Аватар слишком большой. Загрузите изображение до 2 МБ." };
-    }
-  }
-
-  return {
-    avatarUrl,
-    avatarPositionX: Number.isFinite(avatarPositionX) ? Math.max(0, Math.min(100, Math.round(avatarPositionX))) : 50,
-    avatarPositionY: Number.isFinite(avatarPositionY) ? Math.max(0, Math.min(100, Math.round(avatarPositionY))) : 50,
-    avatarScale: Number.isFinite(avatarScale) ? Math.max(100, Math.min(220, Math.round(avatarScale))) : 100,
-  };
-}
-
-function mapAttachments(input) {
-  if (!Array.isArray(input)) return [];
-
-  return input
-    .map((item) => ({
-      name: String(item?.name || "").trim(),
-      type: String(item?.type || "").trim().toLowerCase(),
-      size: Number(item?.size || 0),
-      dataUrl: String(item?.dataUrl || ""),
-    }))
-    .filter((item) => item.name && item.dataUrl && ALLOWED_ATTACHMENT_TYPES.has(item.type) && Number.isFinite(item.size) && item.size > 0 && item.size <= 5 * 1024 * 1024)
-    .slice(0, 5);
 }
 
 function normalizeLifecycleStatus(status) {
@@ -229,7 +244,8 @@ app.get("/api/health", async (_req, res) => {
     const dbOk = await testConnection();
     res.json({ ok: true, database: dbOk ? "connected" : "unavailable" });
   } catch (error) {
-    res.status(500).json({ ok: false, error: error.message });
+    console.error("Health check failed.", error);
+    res.status(500).json({ ok: false, database: "unavailable" });
   }
 });
 
@@ -250,7 +266,7 @@ app.get("/api/locations", async (_req, res) => {
 
     res.json({ cities: result.rows.map((row) => row.city) });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось получить список городов.", error: error.message });
+    serverError(res, "Не удалось получить список городов.", error);
   }
 });
 
@@ -271,32 +287,18 @@ app.get("/api/industries", async (_req, res) => {
 
     res.json({ industries: result.rows.map((row) => row.industry) });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось получить список отраслей.", error: error.message });
+    serverError(res, "Не удалось получить список отраслей.", error);
   }
 });
 
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const companyName = String(req.body.companyName || "").trim();
-    const displayName = String(req.body.displayName || "").trim();
-    const city = String(req.body.city || "").trim();
-    const industry = String(req.body.industry || "").trim();
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const password = String(req.body.password || "");
+    const validation = validateRegisterPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
 
-    if (!companyName || !displayName || !city || !industry || !email || !password) {
-      return res.status(400).json({ message: "Заполните название компании, контактное имя, город, сферу, email и пароль." });
-    }
-
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ message: "Укажите корректный email." });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ message: "Пароль должен быть не короче 6 символов." });
-    }
+    const { companyName, displayName, city, industry, email, password } = validation.value;
 
     await client.query("BEGIN");
 
@@ -334,9 +336,13 @@ app.post("/api/auth/register", async (req, res) => {
     );
 
     const token = crypto.randomUUID();
-    await client.query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)", [token, userId]);
+    await client.query(
+      "INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
+      [token, userId, getSessionExpiresAt()],
+    );
 
     await client.query("COMMIT");
+    await writeAuditLog(req, "auth.register", { userId, companyId, details: { email } }, client);
 
     res.status(201).json({
       token,
@@ -357,12 +363,15 @@ app.post("/api/auth/register", async (req, res) => {
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    res.status(500).json({ message: "Не удалось зарегистрировать аккаунт.", error: error.message });
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: "Пользователь с таким email уже существует.", fields: { email: "Этот email уже занят." } });
+    }
+    serverError(res, "Не удалось зарегистрировать аккаунт.", error);
   } finally {
     client.release();
   }
 });
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await pool.query(
@@ -373,7 +382,14 @@ app.post("/api/auth/login", async (req, res) => {
     const user = result.rows[0];
     const normalizedPassword = String(password || "");
     const passwordOk = user ? await verifyPassword(user.password, normalizedPassword) : false;
-    if (!user || !passwordOk) return res.status(401).json({ message: "Неверный email или пароль." });
+    if (!user || !passwordOk) {
+      await writeAuditLog(req, "auth.login_failed", {
+        userId: user?.id || null,
+        companyId: user?.companyId || null,
+        details: { email: String(email || "").trim().toLowerCase().slice(0, 254) },
+      });
+      return res.status(401).json({ message: "Неверный email или пароль." });
+    }
 
     if (!isBcryptHash(user.password)) {
       const nextHash = await hashPassword(normalizedPassword);
@@ -382,56 +398,60 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = crypto.randomUUID();
-    await pool.query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)", [token, user.id]);
+    await pool.query(
+      "INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
+      [token, user.id, getSessionExpiresAt()],
+    );
+    await writeAuditLog(req, "auth.login", { userId: user.id, companyId: user.companyId || null });
     delete user.password;
     res.json({ token, user });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось выполнить вход.", error: error.message });
+    serverError(res, "Не удалось выполнить вход.", error);
   }
 });
 
 app.post("/api/auth/verify-password", authMiddleware, async (req, res) => {
   try {
-    const password = String(req.body.password || "");
+    const password = String(req.body?.password || "");
     const result = await pool.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
     const storedPassword = result.rows[0]?.password || "";
     const ok = await verifyPassword(storedPassword, password);
 
-    if (!ok) return res.status(401).json({ message: "Неверный пароль." });
+    if (!ok) return res.status(401).json({ message: "Неверный пароль.", fields: { password: "Неверный пароль." } });
 
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось подтвердить пароль.", error: error.message });
+    serverError(res, "Не удалось подтвердить пароль.", error);
   }
 });
 
 app.put("/api/auth/password", authMiddleware, async (req, res) => {
   try {
-    const currentPassword = String(req.body.currentPassword || "");
-    const nextPassword = String(req.body.nextPassword || "");
+    const currentPassword = String(req.body?.currentPassword || "");
+    const nextPasswordResult = validatePassword(req.body?.nextPassword, { field: "nextPassword", label: "Новый пароль" });
 
-    if (nextPassword.length < 6) {
-      return res.status(400).json({ message: "Пароль должен быть не короче 6 символов." });
+    if (!nextPasswordResult.ok) {
+      return res.status(400).json({ message: nextPasswordResult.error, fields: { [nextPasswordResult.field]: nextPasswordResult.error } });
     }
 
+    const nextPassword = nextPasswordResult.value;
     const result = await pool.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
     const storedPassword = result.rows[0]?.password || "";
     const passwordOk = await verifyPassword(storedPassword, currentPassword);
 
     if (!passwordOk) {
-      return res.status(401).json({ message: "Неверный пароль." });
+      return res.status(401).json({ message: "Неверный пароль.", fields: { currentPassword: "Неверный пароль." } });
     }
 
     const nextHash = await hashPassword(nextPassword);
     await pool.query("UPDATE users SET password = $2 WHERE id = $1", [req.user.id, nextHash]);
 
-    const header = req.headers.authorization || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-    await pool.query("DELETE FROM sessions WHERE user_id = $1 AND token <> $2", [req.user.id, token]);
+    await pool.query("DELETE FROM sessions WHERE user_id = $1 AND token <> $2", [req.user.id, getBearerToken(req)]);
+    await writeAuditLog(req, "auth.password_changed", { userId: req.user.id, companyId: req.user.companyId || null });
 
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось сменить пароль.", error: error.message });
+    serverError(res, "Не удалось сменить пароль.", error);
   }
 });
 
@@ -456,11 +476,12 @@ app.delete("/api/auth/company", authMiddleware, async (req, res) => {
     await client.query("DELETE FROM users WHERE company_id = $1", [req.user.companyId]);
     await client.query("DELETE FROM companies WHERE id = $1", [req.user.companyId]);
     await client.query("COMMIT");
+    await writeAuditLog(req, "auth.company_deleted", { userId: req.user.id, companyId: req.user.companyId }, client);
 
     res.json({ ok: true });
   } catch (error) {
     await client.query("ROLLBACK");
-    res.status(500).json({ message: "Не удалось удалить компанию.", error: error.message });
+    serverError(res, "Не удалось удалить компанию.", error);
   } finally {
     client.release();
   }
@@ -475,49 +496,24 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
     if (!client) {
       client = await pool.connect();
     }
+
     const profileBody = body || {};
-    const currentPassword = String(profileBody.currentPassword || "");
-    const displayName = String(profileBody.displayName || "").trim();
-    const email = String(profileBody.email || "").trim().toLowerCase();
-    const companyName = String(profileBody.companyName || "").trim();
-    const city = String(profileBody.city || "").trim();
-    const phone = String(profileBody.phone || "").trim();
-    const industry = String(profileBody.industry || "").trim();
-    const description = String(profileBody.description || "").trim();
-    const about = String(profileBody.about || "").trim();
-    const specializations = Array.isArray(profileBody.specializations)
-      ? profileBody.specializations.map((item) => String(item || "").trim()).filter(Boolean)
-      : String(profileBody.specializations || "").split(",").map((item) => item.trim()).filter(Boolean);
-    const avatarUrlProvided = Object.prototype.hasOwnProperty.call(profileBody, "avatarUrl");
-    const avatar = normalizeAvatarPayload({
-      avatarUrl: avatarUrlProvided ? profileBody.avatarUrl : "",
-      avatarPositionX: profileBody.avatarPositionX,
-      avatarPositionY: profileBody.avatarPositionY,
-      avatarScale: profileBody.avatarScale,
-    });
+    const validation = validateProfilePayload(profileBody, { requireCompanyFields: Boolean(user.companyId) });
 
-    if (hasBrokenEncodingValue([displayName, companyName, city, industry, description, about, specializations])) {
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const value = validation.value;
+
+    if (hasBrokenEncodingValue([value.displayName, value.companyName, value.city, value.industry, value.description, value.about, value.specializations])) {
       return res.status(400).json({ message: "Данные выглядят как сломанная кодировка. Обновите страницу и введите текст заново." });
-    }
-
-    if (avatar.error) {
-      return res.status(400).json({ message: avatar.error });
-    }
-
-    if (!displayName) {
-      return res.status(400).json({ message: "Укажите контактное имя." });
-    }
-
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-      return res.status(400).json({ message: "Укажите корректный email." });
     }
 
     const userResult = await client.query("SELECT password FROM users WHERE id = $1", [user.id]);
     const storedPassword = userResult.rows[0]?.password || "";
-    const passwordOk = await verifyPassword(storedPassword, currentPassword);
+    const passwordOk = await verifyPassword(storedPassword, value.currentPassword);
 
     if (!passwordOk) {
-      return res.status(401).json({ message: "Неверный пароль." });
+      return res.status(401).json({ message: "Неверный пароль.", fields: { currentPassword: "Неверный пароль." } });
     }
 
     await client.query("BEGIN");
@@ -525,22 +521,16 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
     await client.query("SET LOCAL lock_timeout = '3000ms'");
     await client.query("SET LOCAL statement_timeout = '8000ms'");
 
-    const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [email, user.id]);
+    const existingUser = await client.query("SELECT id FROM users WHERE email = $1 AND id <> $2", [value.email, user.id]);
     if (existingUser.rows[0]) {
       await client.query("ROLLBACK");
       inTransaction = false;
-      return res.status(409).json({ message: "Пользователь с таким email уже существует." });
+      return res.status(409).json({ message: "Пользователь с таким email уже существует.", fields: { email: "Этот email уже занят." } });
     }
 
-    await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [user.id, displayName, email]);
+    await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [user.id, value.displayName, value.email]);
 
     if (user.companyId) {
-      if (!companyName || !city || !industry || !description || !about) {
-        await client.query("ROLLBACK");
-        inTransaction = false;
-        return res.status(400).json({ message: "Заполните название компании, город, отрасль, описание и блок О компании." });
-      }
-
       await client.query(
         `UPDATE companies
          SET name = $2,
@@ -555,12 +545,27 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
              avatar_position_y = $12,
              avatar_scale = $13
          WHERE id = $1`,
-        [user.companyId, companyName, city, phone, industry, description, about, JSON.stringify(specializations), avatarUrlProvided, avatar.avatarUrl, avatar.avatarPositionX, avatar.avatarPositionY, avatar.avatarScale],
+        [
+          user.companyId,
+          value.companyName,
+          value.city,
+          value.phone,
+          value.industry,
+          value.description,
+          value.about,
+          JSON.stringify(value.specializations),
+          value.avatarProvided,
+          value.avatarUrl,
+          value.avatarPositionX,
+          value.avatarPositionY,
+          value.avatarScale,
+        ],
       );
     }
 
     await client.query("COMMIT");
     inTransaction = false;
+    await writeAuditLog(req, "auth.profile_updated", { userId: user.id, companyId: user.companyId || null }, client);
 
     const refreshed = await getUserByToken(token, client);
     res.json({ ok: true, user: refreshed });
@@ -571,7 +576,10 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
       } catch {
       }
     }
-    res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: "Пользователь с таким email уже существует.", fields: { email: "Этот email уже занят." } });
+    }
+    serverError(res, "Не удалось обновить данные профиля.", error);
   } finally {
     if (shouldReleaseClient && client) {
       client.release();
@@ -580,43 +588,18 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
 }
 
 app.put("/api/auth/profile", authMiddleware, async (req, res) => {
-  await updateProfileData(req, res, req.user, req.body, getRequestToken(req));
-});
-
-app.post("/api/auth/profile", async (req, res) => {
-  let client;
-
-  try {
-    client = await pool.connect();
-    const body = parsePlainJsonPayload(req.body);
-
-    if (!body) {
-      return res.status(400).json({ message: "Некорректный формат данных профиля." });
-    }
-
-    const token = getRequestToken(req, body);
-    const user = await getUserByToken(token, client);
-
-    if (!user) {
-      return res.status(401).json({ message: "Требуется авторизация." });
-    }
-
-    await updateProfileData(req, res, user, body, token, client);
-  } catch (error) {
-    res.status(500).json({ message: "Не удалось обновить данные профиля.", error: error.message });
-  } finally {
-    if (client) {
-      client.release();
-    }
-  }
+  await updateProfileData(req, res, req.user, req.body || {}, getBearerToken(req));
 });
 
 app.get("/api/auth/me", authMiddleware, async (req, res) => res.json({ user: req.user }));
 app.post("/api/auth/logout", authMiddleware, async (req, res) => {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  await pool.query("DELETE FROM sessions WHERE token = $1", [token]);
-  res.json({ ok: true });
+  try {
+    await pool.query("DELETE FROM sessions WHERE token = $1", [getBearerToken(req)]);
+    await writeAuditLog(req, "auth.logout", { userId: req.user.id, companyId: req.user.companyId || null });
+    res.json({ ok: true });
+  } catch (error) {
+    serverError(res, "Не удалось завершить сеанс.", error);
+  }
 });
 
 // Объявления и управление каталогом.
@@ -625,7 +608,7 @@ app.get("/api/orders", async (_req, res) => {
     const result = await pool.query(
       `SELECT o.id, o.title, o.category, o.city_major AS "cityMajor", o.location_detail AS "locationDetail", o.city,
               o.budget_from AS "budgetFrom", o.budget_to AS "budgetTo", o.budget_label AS budget,
-              o.summary, o.description, o.terms, o.tags, o.published_at AS date,
+              o.summary, o.description, o.terms, o.tags, o.published_at AS "publishedAt",
               c.id AS "companyId", c.name AS company,
               COUNT(DISTINCT ov.user_id)::integer AS "viewsCount"
        FROM orders o
@@ -634,19 +617,25 @@ app.get("/api/orders", async (_req, res) => {
        GROUP BY o.id, c.id, c.name
        ORDER BY o.sort_order ASC, o.id ASC`,
     );
-    res.json(result.rows);
+    res.json(result.rows.map((row) => ({
+      ...row,
+      tags: Array.isArray(row.tags) ? row.tags : [],
+      date: formatDisplayDate(row.publishedAt),
+    })));
   } catch (error) {
-    res.status(500).json({ message: "Не удалось получить список заказов.", error: error.message });
+    serverError(res, "Не удалось получить список заказов.", error);
   }
 });
 
 app.post("/api/orders", authMiddleware, async (req, res) => {
   try {
-    const payload = mapOrderPayload(req.body);
-    if (payload.error) return res.status(400).json({ message: payload.error });
-    const id = `ord-${Date.now()}`;
-    const companyId = req.user.role === "admin" ? String(req.body.companyId || "").trim() : req.user.companyId;
-    if (!companyId) return res.status(400).json({ message: "Выберите компанию для объявления." });
+    const validation = validateOrderPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const payload = validation.value;
+    const id = `ord-${crypto.randomUUID()}`;
+    const companyId = req.user.role === "admin" ? String(req.body?.companyId || "").trim() : req.user.companyId;
+    if (!companyId) return res.status(400).json({ message: "Выберите компанию для объявления.", fields: { companyId: "Выберите компанию." } });
 
     const companyExists = await pool.query("SELECT id FROM companies WHERE id = $1", [companyId]);
     if (!companyExists.rows[0]) return res.status(404).json({ message: "Компания для объявления не найдена." });
@@ -654,11 +643,11 @@ app.post("/api/orders", authMiddleware, async (req, res) => {
     await pool.query(
       `INSERT INTO orders (id, company_id, title, category, city_major, location_detail, city, budget_from, budget_to, budget_label, summary, description, terms, tags, published_at, sort_order)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,COALESCE((SELECT MAX(sort_order)+1 FROM orders),1))`,
-      [id, companyId, payload.title, payload.category, payload.cityMajor, payload.locationDetail, payload.city, payload.budgetFrom, payload.budgetTo, payload.budgetLabel, payload.summary, payload.description, payload.terms, JSON.stringify(payload.tags), payload.publishedAt],
+      [id, companyId, payload.title, payload.category, payload.cityMajor, payload.locationDetail, payload.city, payload.budgetFrom, payload.budgetTo, payload.budgetLabel, payload.summary, payload.description, payload.terms, JSON.stringify(payload.tags), new Date().toISOString()],
     );
     res.status(201).json({ ok: true, id });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось создать объявление.", error: error.message });
+    serverError(res, "Не удалось создать объявление.", error);
   }
 });
 
@@ -668,10 +657,12 @@ app.put("/api/orders/:id", authMiddleware, async (req, res) => {
     const order = existing.rows[0];
     if (!order) return res.status(404).json({ message: "Объявление не найдено." });
     if (!(req.user.role === "admin" || req.user.companyId === order.companyId)) return res.status(403).json({ message: "Недостаточно прав." });
-    const payload = mapOrderPayload({ ...req.body, date: order.publishedAt });
-    if (payload.error) return res.status(400).json({ message: payload.error });
 
-    const nextCompanyId = req.user.role === "admin" ? String(req.body.companyId || order.companyId).trim() : order.companyId;
+    const validation = validateOrderPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const payload = validation.value;
+    const nextCompanyId = req.user.role === "admin" ? String(req.body?.companyId || order.companyId).trim() : order.companyId;
     const companyExists = await pool.query("SELECT id FROM companies WHERE id = $1", [nextCompanyId]);
     if (!companyExists.rows[0]) return res.status(404).json({ message: "Компания для объявления не найдена." });
 
@@ -681,7 +672,7 @@ app.put("/api/orders/:id", authMiddleware, async (req, res) => {
     );
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось обновить объявление.", error: error.message });
+    serverError(res, "Не удалось обновить объявление.", error);
   }
 });
 
@@ -694,17 +685,22 @@ app.delete("/api/orders/:id", authMiddleware, async (req, res) => {
     await pool.query("DELETE FROM orders WHERE id = $1", [req.params.id]);
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось удалить объявление.", error: error.message });
+    serverError(res, "Не удалось удалить объявление.", error);
   }
 });
 
 app.post("/api/orders/:id/view", optionalAuthMiddleware, async (req, res) => {
   try {
     const orderId = req.params.id;
-    const existingOrder = await pool.query("SELECT id FROM orders WHERE id = $1", [orderId]);
+    const existingOrder = await pool.query(
+      `SELECT id, company_id AS "companyId" FROM orders WHERE id = $1`,
+      [orderId],
+    );
     if (!existingOrder.rows[0]) return res.status(404).json({ message: "Объявление не найдено." });
 
-    if (req.user?.id) {
+    const isOwner = Boolean(req.user?.companyId && req.user.companyId === existingOrder.rows[0].companyId);
+
+    if (req.user?.id && !isOwner) {
       await pool.query(
         `INSERT INTO order_views (order_id, user_id)
          VALUES ($1, $2)
@@ -722,7 +718,7 @@ app.post("/api/orders/:id/view", optionalAuthMiddleware, async (req, res) => {
 
     res.status(201).json({ ok: true, viewsCount: stats.rows[0]?.viewsCount ?? 0 });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось сохранить просмотр.", error: error.message });
+    serverError(res, "Не удалось сохранить просмотр.", error);
   }
 });
 
@@ -733,29 +729,34 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
       return res.status(403).json({ message: "Только компания может открывать чаты." });
     }
 
-    const otherCompanyId = String(req.body.companyId || "").trim();
-    const orderId = String(req.body.orderId || "").trim() || null;
+    const validation = validateChatOpenPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
 
-    if (!otherCompanyId) {
-      return res.status(400).json({ message: "Не указана компания для чата." });
-    }
+    const { companyId: otherCompanyId, orderId: rawOrderId, subject: rawSubject } = validation.value;
+    const orderId = rawOrderId || null;
 
     if (otherCompanyId === req.user.companyId) {
       return res.status(400).json({ message: "Нельзя открыть чат со своей компанией." });
     }
 
-    let subject = String(req.body.subject || "").trim();
+    const otherCompany = await pool.query("SELECT id FROM companies WHERE id = $1", [otherCompanyId]);
+    if (!otherCompany.rows[0]) return res.status(404).json({ message: "Компания для чата не найдена." });
+
+    let subject = rawSubject;
     let orderDetails = null;
 
     if (orderId) {
       const orderResult = await pool.query(
-        `SELECT id, title, budget_label AS budget, summary, terms
+        `SELECT id, company_id AS "companyId", title, budget_label AS budget, summary, terms
          FROM orders
          WHERE id = $1`,
         [orderId],
       );
       orderDetails = orderResult.rows[0] ?? null;
       if (!orderDetails) return res.status(404).json({ message: "Объявление не найдено." });
+      if (orderDetails.companyId !== otherCompanyId) {
+        return res.status(400).json({ message: "Объявление принадлежит другой компании.", fields: { companyId: "Выберите компанию, которой принадлежит объявление." } });
+      }
       if (!subject) subject = `Отклик по объявлению: ${orderDetails.title}`;
     }
 
@@ -781,7 +782,7 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
           [req.user.companyId, otherCompanyId],
         );
 
-    const chatId = existing.rows[0]?.id || `chat-${Date.now()}`;
+    const chatId = existing.rows[0]?.id || `chat-${crypto.randomUUID()}`;
 
     if (!existing.rows[0]) {
       await pool.query(
@@ -801,7 +802,7 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, chatId });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось открыть чат.", error: error.message });
+    serverError(res, "Не удалось открыть чат.", error);
   }
 });
 app.get("/api/chats", authMiddleware, async (req, res) => {
@@ -822,7 +823,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
                                  AND m.sender_company_id <> $2
                                  AND m.created_at > COALESCE(cr.last_read_at, 'epoch'::timestamptz)), 0)
               END AS "unreadCount",
-              to_char(cr.last_read_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastReadAtIso",
+              to_char(cr.last_read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastReadAtIso",
               ch.offered_details AS "offeredDetails",
               ch.agreement_details AS "agreementDetails",
               to_char(ch.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt",
@@ -872,7 +873,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
               o.company_id AS "orderCompanyId",
               (SELECT m.sender_company_id FROM chat_messages m WHERE m.chat_id = ch.id ORDER BY m.created_at DESC LIMIT 1) AS "lastSenderCompanyId",
               COALESCE((SELECT to_char(m.created_at, 'DD.MM.YYYY HH24:MI') FROM chat_messages m WHERE m.chat_id = ch.id ORDER BY m.created_at DESC LIMIT 1), to_char(ch.created_at, 'DD.MM.YYYY HH24:MI')) AS "lastActivityAt",
-              COALESCE((SELECT json_agg(json_build_object('id', m.id, 'text', m.text, 'createdAt', to_char(m.created_at, 'DD.MM.YYYY HH24:MI'), 'senderCompanyId', m.sender_company_id, 'attachments', m.attachments, 'createdAtIso', to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), '[]'::json) AS messages
+              COALESCE((SELECT json_agg(json_build_object('id', m.id, 'text', m.text, 'createdAt', to_char(m.created_at, 'DD.MM.YYYY HH24:MI'), 'senderCompanyId', m.sender_company_id, 'attachments', m.attachments, 'createdAtIso', to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), '[]'::json) AS messages
        FROM chats ch
        JOIN companies ca ON ca.id = ch.company_a_id
        JOIN companies cb ON cb.id = ch.company_b_id
@@ -886,7 +887,7 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
     );
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ message: "Не удалось получить чаты.", error: error.message });
+    serverError(res, "Не удалось получить чаты.", error);
   }
 });
 
@@ -897,7 +898,7 @@ app.post("/api/chats/:id/read", authMiddleware, async (req, res) => {
     if (!req.user.companyId) return res.json({ ok: true });
 
     await pool.query(
-                                                `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
+      `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
        VALUES ($1, $2, NOW())
        ON CONFLICT (chat_id, company_id)
        DO UPDATE SET last_read_at = EXCLUDED.last_read_at`,
@@ -906,7 +907,7 @@ app.post("/api/chats/:id/read", authMiddleware, async (req, res) => {
 
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось отметить чат как прочитанный.", error: error.message });
+    serverError(res, "Не удалось отметить чат как прочитанный.", error);
   }
 });
 
@@ -914,14 +915,15 @@ app.delete("/api/chats/:id", authMiddleware, async (req, res) => {
   try {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
-    if (!(req.user.role === "admin" || req.user.companyId)) {
-      return res.status(403).json({ message: "Только авторизованная компания или администратор может удалить чат." });
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ message: "Удалить переписку может только администратор. Компания может перенести чат в архив." });
     }
 
     await pool.query("DELETE FROM chats WHERE id = $1", [req.params.id]);
+    await writeAuditLog(req, "admin.chat_deleted", { userId: req.user.id, details: { chatId: req.params.id } });
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось удалить чат.", error: error.message });
+    serverError(res, "Не удалось удалить чат.", error);
   }
 });
 
@@ -930,20 +932,22 @@ app.put("/api/chats/:id/details", authMiddleware, async (req, res) => {
     const chat = await getChatForUser(req.params.id, req.user);
     if (!chat) return res.status(404).json({ message: "Чат не найден." });
 
-    const offeredDetails = String(req.body.offeredDetails || "").trim();
-    const agreementDetails = String(req.body.agreementDetails || "").trim();
+    const validation = validateChatDetailsPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const value = validation.value;
 
     await pool.query(
       `UPDATE chats
-       SET offered_details = $2,
-           agreement_details = $3
+       SET offered_details = COALESCE($2, offered_details),
+           agreement_details = COALESCE($3, agreement_details)
        WHERE id = $1`,
-      [req.params.id, offeredDetails, agreementDetails],
+      [req.params.id, value.offeredDetails ?? null, value.agreementDetails ?? null],
     );
 
     res.json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось обновить данные чата.", error: error.message });
+    serverError(res, "Не удалось обновить данные чата.", error);
   }
 });
 
@@ -955,13 +959,12 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
       return res.status(403).json({ message: "Только компания может архивировать чат." });
     }
 
-    const isArchived = Boolean(req.body.isArchived);
+    const validation = validateArchivePayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const { isArchived } = validation.value;
 
     if (isArchived) {
-      if (normalizeLifecycleStatus(chat.lifecycleStatus) !== "closed") {
-        return res.status(400).json({ message: "Перенести чат в архив можно только после статуса Закрыто." });
-      }
-
       await pool.query(
         `INSERT INTO chat_archives (chat_id, company_id, archived_at)
          VALUES ($1, $2, NOW())
@@ -979,7 +982,7 @@ app.put("/api/chats/:id/archive", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, isArchived });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось обновить архив чата.", error: error.message });
+    serverError(res, "Не удалось обновить архив чата.", error);
   }
 });
 
@@ -991,14 +994,17 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
       return res.status(403).json({ message: "Только компания может менять статус переговоров." });
     }
 
-    const nextStatus = String(req.body.status || "").trim();
-    const allowedStatuses = ["negotiation", "closed"];
-    if (!allowedStatuses.includes(nextStatus)) {
-      return res.status(400).json({ message: "Некорректный статус переговоров." });
+    const validation = validateStatusRequestPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const { status: nextStatus } = validation.value;
+
+    if (chat.pendingStatus) {
+      return res.status(409).json({ message: "Уже есть активный запрос на смену статуса. Дождитесь ответа второй стороны." });
     }
 
     const currentStatus = normalizeLifecycleStatus(chat.lifecycleStatus);
-    if (nextStatus === currentStatus && !chat.pendingStatus) {
+    if (nextStatus === currentStatus) {
       return res.json({ ok: true, lifecycleStatus: currentStatus, isArchived: chat.isArchived, pendingStatus: null });
     }
 
@@ -1012,7 +1018,7 @@ app.put("/api/chats/:id/status-request", authMiddleware, async (req, res) => {
 
     res.json({ ok: true, pendingStatus: nextStatus });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось отправить запрос на смену статуса.", error: error.message });
+    serverError(res, "Не удалось отправить запрос на смену статуса.", error);
   }
 });
 
@@ -1030,7 +1036,10 @@ app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, re
       return res.status(403).json({ message: "Нельзя подтверждать или отклонять собственный запрос на смену статуса." });
     }
 
-    const accepted = Boolean(req.body.accepted);
+    const validation = validateStatusResponsePayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const { accepted } = validation.value;
 
     if (accepted) {
       const nextLifecycleStatus = normalizeLifecycleStatus(chat.pendingStatus);
@@ -1057,7 +1066,7 @@ app.post("/api/chats/:id/status-request/respond", authMiddleware, async (req, re
 
     res.json({ ok: true, accepted: false });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось обработать запрос на смену статуса.", error: error.message });
+    serverError(res, "Не удалось обработать запрос на смену статуса.", error);
   }
 });
 
@@ -1068,13 +1077,14 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
     if (!req.user.companyId) {
       return res.status(403).json({ message: "Только компания может отправлять сообщения." });
     }
-
-    const text = String(req.body.text || "").trim();
-    const attachments = mapAttachments(req.body.attachments);
-
-    if (!text && attachments.length === 0) {
-      return res.status(400).json({ message: "Добавьте текст сообщения или вложение." });
+    if (normalizeLifecycleStatus(chat.lifecycleStatus) === "closed") {
+      return res.status(400).json({ message: "Переписка закрыта. Чтобы продолжить общение, откройте новый чат." });
     }
+
+    const validation = validateMessagePayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const { text, attachments } = validation.value;
 
     await pool.query(
       `INSERT INTO chat_messages (id, chat_id, sender_company_id, text, attachments)
@@ -1092,11 +1102,13 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
 
     res.status(201).json({ ok: true });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось отправить сообщение.", error: error.message });
+    serverError(res, "Не удалось отправить сообщение.", error);
   }
 });
 // Каталог компаний и social proof.
 app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+
   try {
     if (!req.user.companyId) {
       return res.status(403).json({ message: "Только компания может оставить отзыв." });
@@ -1106,35 +1118,38 @@ app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
       return res.status(403).json({ message: "О своей компании отзыв оставить нельзя." });
     }
 
-    const textValue = String(req.body.text || "").trim();
-    const ratingValue = Number(req.body.rating);
+    const validation = validateReviewPayload(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
 
-    if (!textValue) {
-      return res.status(400).json({ message: "Введите текст отзыва." });
-    }
+    const { text, rating: ratingValue } = validation.value;
 
-    if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
-      return res.status(400).json({ message: "Выберите оценку от 1 до 5." });
-    }
+    await client.query("BEGIN");
 
-    const companyResult = await pool.query("SELECT reviews FROM companies WHERE id = $1", [req.params.id]);
+    const companyResult = await client.query("SELECT reviews FROM companies WHERE id = $1 FOR UPDATE", [req.params.id]);
     const company = companyResult.rows[0];
     if (!company) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ message: "Профиль компании не найден." });
     }
 
+    const currentReviews = Array.isArray(company.reviews) ? company.reviews : [];
+    const existingIndex = currentReviews.findIndex((review) => review?.authorCompanyId === req.user.companyId);
+    const existingReview = existingIndex >= 0 ? currentReviews[existingIndex] : null;
+    const now = new Date().toISOString();
     const nextReview = {
-      id: "rev-" + crypto.randomUUID(),
+      id: existingReview?.id || "rev-" + crypto.randomUUID(),
       author: req.user.displayName || req.user.company || "Пользователь",
       authorCompanyId: req.user.companyId,
       authorCompanyName: req.user.company || "",
       rating: ratingValue,
-      text: textValue,
-      createdAt: new Date().toISOString(),
+      text,
+      createdAt: existingReview?.createdAt || now,
+      updatedAt: now,
     };
 
-    const currentReviews = Array.isArray(company.reviews) ? company.reviews : [];
-    const nextReviews = [nextReview, ...currentReviews];
+    const nextReviews = existingIndex >= 0
+      ? currentReviews.map((review, index) => (index === existingIndex ? nextReview : review))
+      : [nextReview, ...currentReviews];
     const ratingSource = nextReviews
       .map((review) => Number(review?.rating))
       .filter((value) => Number.isFinite(value) && value >= 1 && value <= 5);
@@ -1142,14 +1157,21 @@ app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
       ? Number((ratingSource.reduce((sum, value) => sum + value, 0) / ratingSource.length).toFixed(1))
       : 0;
 
-    await pool.query(
+    await client.query(
       "UPDATE companies SET reviews = $2::jsonb, rating = $3 WHERE id = $1",
       [req.params.id, JSON.stringify(nextReviews), nextRating],
     );
 
-    res.status(201).json({ ok: true, review: nextReview, rating: nextRating });
+    await client.query("COMMIT");
+    res.status(existingReview ? 200 : 201).json({ ok: true, review: nextReview, rating: nextRating, updated: Boolean(existingReview) });
   } catch (error) {
-    res.status(500).json({ message: "Не удалось сохранить отзыв.", error: error.message });
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+    }
+    serverError(res, "Не удалось сохранить отзыв.", error);
+  } finally {
+    client.release();
   }
 });
 app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
@@ -1190,9 +1212,13 @@ app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
        ORDER BY c.id ASC`,
       [Boolean(req.user)],
     );
-    res.json(result.rows);
+    res.json(result.rows.map((row) => ({
+      ...row,
+      specializations: Array.isArray(row.specializations) ? row.specializations : [],
+      reviews: Array.isArray(row.reviews) ? row.reviews : [],
+    })));
   } catch (error) {
-    res.status(500).json({ message: "Не удалось получить список компаний.", error: error.message });
+    serverError(res, "Не удалось получить список компаний.", error);
   }
 });
 app.get("/api/suppliers", async (_req, res) => {
@@ -1222,10 +1248,57 @@ app.get("/api/suppliers", async (_req, res) => {
        FROM companies c
        ORDER BY c.created_at DESC, c.id ASC`,
     );
-    res.json(result.rows);
+    res.json(result.rows.map((row) => ({
+      ...row,
+      skills: Array.isArray(row.skills) ? row.skills : [],
+    })));
   } catch (error) {
-    res.status(500).json({ message: "Не удалось получить список поставщиков.", error: error.message });
+    serverError(res, "Не удалось получить список поставщиков.", error);
   }
 });
 
-app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+async function ensureSecuritySchema() {
+  await pool.query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
+  await pool.query(
+    `UPDATE sessions
+     SET expires_at = created_at + ($1::int * INTERVAL '1 day')
+     WHERE expires_at IS NULL`,
+    [SESSION_TTL_DAYS],
+  );
+  await pool.query("CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions (expires_at)");
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS audit_log (
+       id BIGSERIAL PRIMARY KEY,
+       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       user_id TEXT,
+       company_id TEXT,
+       action TEXT NOT NULL,
+       ip TEXT,
+       details JSONB NOT NULL DEFAULT '{}'::jsonb
+     )`,
+  );
+  await pool.query("CREATE INDEX IF NOT EXISTS audit_log_created_at_idx ON audit_log (created_at DESC)");
+}
+
+async function cleanupExpiredSessions() {
+  const result = await pool.query("DELETE FROM sessions WHERE expires_at IS NULL OR expires_at <= NOW()");
+  return result.rowCount;
+}
+
+async function startServer() {
+  try {
+    await ensureSecuritySchema();
+    const removedSessions = await cleanupExpiredSessions();
+    if (removedSessions) console.log(`Удалено просроченных сессий: ${removedSessions}`);
+  } catch (error) {
+    console.error("Не удалось применить security-схему.", error);
+  }
+
+  app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+}
+
+startServer();
+
+setInterval(() => {
+  cleanupExpiredSessions().catch((error) => console.error("Не удалось очистить просроченные сессии.", error));
+}, 6 * 60 * 60 * 1000).unref();

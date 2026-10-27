@@ -17,6 +17,9 @@ function FilterSidebar({
   onMaxChange,
   minPlaceholder,
   maxPlaceholder,
+  rangeHint = "",
+  rangeMinValue = 0,
+  rangeMaxValue,
   dateFilterValue,
   onDateFilterChange,
   dateFilterOptions = [],
@@ -27,12 +30,14 @@ function FilterSidebar({
   onMajorCityBlur,
   majorCitySuggestions = [],
   onMajorCitySuggestionPick,
+  majorCityHint = "",
   locationOptions,
   selectedLocation = "",
   onLocationChange,
   onLocationBlur,
   locationSuggestions = [],
   onLocationSuggestionPick,
+  locationHint = "",
   majorCityLabel = "Город",
   locationLabel = "Пригород / район",
   onReset,
@@ -109,6 +114,7 @@ function FilterSidebar({
               </div>
             ) : null}
           </label>
+          {majorCityHint ? <span className="field-error city-hint">{majorCityHint}</span> : null}
 
           {locationOptions?.length ? (
             <label className="field city-field">
@@ -145,6 +151,7 @@ function FilterSidebar({
               ) : null}
             </label>
           ) : null}
+          {locationHint ? <span className="field-error city-hint">{locationHint}</span> : null}
         </>
       ) : (
         <div className="field">
@@ -171,7 +178,8 @@ function FilterSidebar({
           <input
             name="rangeMin"
             type="number"
-            min="0"
+            min={rangeMinValue}
+            max={rangeMaxValue}
             step="1"
             value={minValue}
             onChange={(event) => onMinChange(event.target.value)}
@@ -180,13 +188,15 @@ function FilterSidebar({
           <input
             name="rangeMax"
             type="number"
-            min="0"
+            min={rangeMinValue}
+            max={rangeMaxValue}
             step="1"
             value={maxValue}
             onChange={(event) => onMaxChange(event.target.value)}
             placeholder={maxPlaceholder}
           />
         </div>
+        {rangeHint ? <span className="field-error">{rangeHint}</span> : null}
       </div>
 
       <button type="button" className="button button-ghost button-block" onClick={onReset}>

@@ -1,8 +1,14 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
+import { LIMITS, validateRegisterPayload } from "../../shared/validation.js";
+
+function readNextPath(value) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "";
+  return value;
+}
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -18,6 +24,7 @@ function LoginPage() {
   const [industryOptions, setIndustryOptions] = useState([]);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
   // Подсказки отраслей берём из существующих компаний/поставщиков/заказов, но поле остаётся свободным.
@@ -27,17 +34,45 @@ function LoginPage() {
       .catch(() => setIndustryOptions([]));
   }, []);
 
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setError("");
+    setFieldErrors({});
+  };
+
   const handleLogin = async (event) => {
     event.preventDefault();
     setError("");
+    setFieldErrors({});
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const nextFieldErrors = {};
+
+    if (!normalizedEmail) {
+      nextFieldErrors.email = "Укажите email.";
+    } else if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      nextFieldErrors.email = "Укажите корректный email.";
+    }
+
+    if (!password) {
+      nextFieldErrors.password = "Введите пароль.";
+    }
+
+    if (Object.keys(nextFieldErrors).length) {
+      setFieldErrors(nextFieldErrors);
+      setError(nextFieldErrors[Object.keys(nextFieldErrors)[0]]);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await login(email, password);
-      const nextPath = searchParams.get("next");
+      await login(normalizedEmail, password);
+      const nextPath = readNextPath(searchParams.get("next"));
       navigate(nextPath || "/");
     } catch (loginError) {
       setError(loginError.message);
+      if (loginError.fields) setFieldErrors(loginError.fields);
     } finally {
       setLoading(false);
     }
@@ -46,8 +81,26 @@ function LoginPage() {
   const handleRegister = async (event) => {
     event.preventDefault();
     setError("");
+    setFieldErrors({});
+
+    const payload = {
+      companyName: companyName.trim(),
+      displayName: displayName.trim(),
+      city: city.trim(),
+      industry: industry.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+    };
+    const validation = validateRegisterPayload(payload);
+
+    if (!validation.ok) {
+      setFieldErrors(validation.fields);
+      setError(validation.message);
+      return;
+    }
 
     if (password !== confirmPassword) {
+      setFieldErrors({ confirmPassword: "Пароли не совпадают." });
       setError("Пароли не совпадают.");
       return;
     }
@@ -55,11 +108,12 @@ function LoginPage() {
     setLoading(true);
 
     try {
-      await register({ companyName, displayName, city, industry, email, password });
-      const nextPath = searchParams.get("next");
+      await register(validation.value);
+      const nextPath = readNextPath(searchParams.get("next"));
       navigate(nextPath || "/create");
     } catch (registerError) {
       setError(registerError.message);
+      if (registerError.fields) setFieldErrors(registerError.fields);
     } finally {
       setLoading(false);
     }
@@ -71,23 +125,43 @@ function LoginPage() {
         <div className="login-card card auth-card-wide">
           <h1>{mode === "login" ? "Вход в кабинет компании" : "Регистрация компании"}</h1>
           <div className="auth-mode-switch">
-            <button type="button" className={mode === "login" ? "button button-primary" : "button button-secondary"} onClick={() => { setMode("login"); setError(""); }}>
+            <button type="button" className={mode === "login" ? "button button-primary" : "button button-secondary"} onClick={() => switchMode("login")}>
               Вход
             </button>
-            <button type="button" className={mode === "register" ? "button button-primary" : "button button-secondary"} onClick={() => { setMode("register"); setError(""); }}>
+            <button type="button" className={mode === "register" ? "button button-primary" : "button button-secondary"} onClick={() => switchMode("register")}>
               Регистрация
             </button>
           </div>
 
           {mode === "login" ? (
-            <form className="login-form" onSubmit={handleLogin}>
+            <form className="login-form" onSubmit={handleLogin} noValidate>
               <label className="field">
                 <span>Email</span>
-                <input name="loginEmail" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="northbeans@b2b.local" />
+                <input
+                  name="loginEmail"
+                  type="email"
+                  required
+                  maxLength={LIMITS.auth.emailMax}
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="northbeans@b2b.local"
+                />
+                {fieldErrors.email ? <span className="field-error">{fieldErrors.email}</span> : null}
               </label>
               <label className="field">
                 <span>Пароль</span>
-                <input name="loginPassword" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Введите пароль" />
+                <input
+                  name="loginPassword"
+                  type="password"
+                  required
+                  maxLength={LIMITS.auth.passwordMaxBytes}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Введите пароль"
+                />
+                {fieldErrors.password ? <span className="field-error">{fieldErrors.password}</span> : null}
               </label>
               {error ? <div className="error-banner">{error}</div> : null}
               <button type="submit" className="button button-primary button-block" disabled={loading}>
@@ -95,24 +169,53 @@ function LoginPage() {
               </button>
             </form>
           ) : (
-            <form className="login-form" onSubmit={handleRegister}>
+            <form className="login-form" onSubmit={handleRegister} noValidate>
               <label className="field">
                 <span>Название компании</span>
-                <input name="registerCompanyName" value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder="ООО Северный Поставщик" />
+                <input
+                  name="registerCompanyName"
+                  required
+                  maxLength={LIMITS.profile.companyNameMax}
+                  autoComplete="organization"
+                  value={companyName}
+                  onChange={(event) => setCompanyName(event.target.value)}
+                  placeholder="ООО Северный Поставщик"
+                />
+                {fieldErrors.companyName ? <span className="field-error">{fieldErrors.companyName}</span> : null}
               </label>
               <label className="field">
                 <span>Контактное имя</span>
-                <input name="registerDisplayName" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Анна Петрова" />
+                <input
+                  name="registerDisplayName"
+                  required
+                  maxLength={LIMITS.profile.displayNameMax}
+                  autoComplete="name"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Анна Петрова"
+                />
+                {fieldErrors.displayName ? <span className="field-error">{fieldErrors.displayName}</span> : null}
               </label>
               <label className="field">
                 <span>Город</span>
-                <input name="registerCity" value={city} onChange={(event) => setCity(event.target.value)} placeholder="Екатеринбург" />
+                <input
+                  name="registerCity"
+                  required
+                  maxLength={LIMITS.profile.cityMax}
+                  autoComplete="address-level2"
+                  value={city}
+                  onChange={(event) => setCity(event.target.value)}
+                  placeholder="Екатеринбург"
+                />
+                {fieldErrors.city ? <span className="field-error">{fieldErrors.city}</span> : null}
               </label>
               <label className="field">
                 <span>Сфера</span>
                 <input
                   name="registerIndustry"
                   list="industry-options"
+                  required
+                  maxLength={LIMITS.profile.industryMax}
                   value={industry}
                   onChange={(event) => setIndustry(event.target.value)}
                   placeholder="Выберите существующую или укажите свою сферу"
@@ -122,18 +225,51 @@ function LoginPage() {
                     <option key={item} value={item} />
                   ))}
                 </datalist>
+                {fieldErrors.industry ? <span className="field-error">{fieldErrors.industry}</span> : null}
               </label>
               <label className="field">
                 <span>Email</span>
-                <input name="registerEmail" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="company@example.ru" />
+                <input
+                  name="registerEmail"
+                  type="email"
+                  required
+                  maxLength={LIMITS.auth.emailMax}
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="company@example.ru"
+                />
+                {fieldErrors.email ? <span className="field-error">{fieldErrors.email}</span> : null}
               </label>
               <label className="field">
                 <span>Пароль</span>
-                <input name="registerPassword" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 6 символов" />
+                <input
+                  name="registerPassword"
+                  type="password"
+                  required
+                  minLength={LIMITS.auth.passwordMinBytes}
+                  maxLength={LIMITS.auth.passwordMaxBytes}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={`Минимум ${LIMITS.auth.passwordMinBytes} символов`}
+                />
+                {fieldErrors.password ? <span className="field-error">{fieldErrors.password}</span> : null}
               </label>
               <label className="field">
                 <span>Повторите пароль</span>
-                <input name="registerConfirmPassword" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Повторите пароль" />
+                <input
+                  name="registerConfirmPassword"
+                  type="password"
+                  required
+                  minLength={LIMITS.auth.passwordMinBytes}
+                  maxLength={LIMITS.auth.passwordMaxBytes}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Повторите пароль"
+                />
+                {fieldErrors.confirmPassword ? <span className="field-error">{fieldErrors.confirmPassword}</span> : null}
               </label>
               {error ? <div className="error-banner">{error}</div> : null}
               <button type="submit" className="button button-primary button-block" disabled={loading}>

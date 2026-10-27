@@ -4,6 +4,7 @@ import { getAvatarStyle, getInitials } from "../lib/avatar";
 
 function CompanyCard({ supplier, onTagClick }) {
   const { user } = useAuth();
+  const skills = Array.isArray(supplier.skills) ? supplier.skills : [];
   const openCard = () => {
     window.open(`#/company/${supplier.companyId}`, "_blank", "noopener,noreferrer");
   };
@@ -29,7 +30,7 @@ function CompanyCard({ supplier, onTagClick }) {
         <p className="company-city">{supplier.city}</p>
         <p>{supplier.summary}</p>
         <div className="card-tags">
-          {supplier.skills.map((skill) => (
+          {skills.map((skill) => (
             onTagClick ? (
               <button
                 key={skill}

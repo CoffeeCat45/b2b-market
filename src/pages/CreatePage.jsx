@@ -1,16 +1,18 @@
 import { useMemo, useState } from "react";
-import { Navigate, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
-import { apiFetch, apiPlainPost } from "../lib/api";
+import { apiFetch } from "../lib/api";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
+import { LIMITS, validatePassword, validateProfilePayload } from "../../shared/validation.js";
 
 function CreatePage() {
   const { user, loading, updateUser } = useAuth();
   const { orders, companies, reload } = useMarketplaceData();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [adminSearch, setAdminSearch] = useState("");
@@ -80,8 +82,8 @@ function CreatePage() {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      setProfileError("Аватар слишком большой. Загрузите изображение до 2 МБ.");
+    if (file.size > LIMITS.files.avatarMaxBytes) {
+      setProfileError(`Аватар слишком большой. Загрузите изображение до ${LIMITS.files.avatarMaxBytes / (1024 * 1024)} МБ.`);
       return;
     }
 
@@ -119,7 +121,13 @@ function CreatePage() {
       industry: currentCompany?.industry || user?.industry || "",
       description: currentCompany?.description || user?.description || "",
       about: currentCompany?.about || user?.about || "",
-      specializations: (currentCompany?.specializations || user?.specializations || []).join(", "),
+      specializations: (
+        Array.isArray(currentCompany?.specializations)
+          ? currentCompany.specializations
+          : Array.isArray(user?.specializations)
+            ? user.specializations
+            : []
+      ).join(", "),
       avatarUrl: nextAvatarUrl,
       avatarPositionX: currentCompany?.avatarPositionX ?? user?.avatarPositionX ?? 50,
       avatarPositionY: currentCompany?.avatarPositionY ?? user?.avatarPositionY ?? 50,
@@ -173,39 +181,46 @@ function CreatePage() {
   const saveProfile = async (event) => {
     event.preventDefault();
     setProfileError("");
+
+    const avatarChanged = profileForm.avatarUrl !== initialAvatarUrl;
+    const payload = {
+      currentPassword: profilePassword,
+      displayName: profileForm.displayName.trim(),
+      email: profileForm.email.trim(),
+      companyName: profileForm.companyName.trim(),
+      city: profileForm.city.trim(),
+      phone: profileForm.phone.trim(),
+      industry: profileForm.industry.trim(),
+      description: profileForm.description.trim(),
+      about: profileForm.about.trim(),
+      specializations: profileForm.specializations,
+      avatarPositionX: profileForm.avatarPositionX,
+      avatarPositionY: profileForm.avatarPositionY,
+      avatarScale: profileForm.avatarScale,
+      ...(avatarChanged ? { avatarUrl: profileForm.avatarUrl } : {}),
+    };
+    const validation = validateProfilePayload(payload, { requireCompanyFields: Boolean(user.companyId) });
+
+    if (!validation.ok) {
+      setProfileError(validation.message);
+      return;
+    }
+
     setProfileLoading(true);
 
     try {
-      const avatarChanged = profileForm.avatarUrl !== initialAvatarUrl;
-      const data = await apiPlainPost(
-        "/auth/profile",
-        {
-          currentPassword: profilePassword,
-          displayName: profileForm.displayName,
-          email: profileForm.email,
-          companyName: profileForm.companyName,
-          city: profileForm.city,
-          phone: profileForm.phone,
-          industry: profileForm.industry,
-          description: profileForm.description,
-          about: profileForm.about,
-          specializations: profileForm.specializations,
-          ...(avatarChanged ? { avatarUrl: profileForm.avatarUrl } : {}),
-          avatarPositionX: profileForm.avatarPositionX,
-          avatarPositionY: profileForm.avatarPositionY,
-          avatarScale: profileForm.avatarScale,
-        },
-        {
-          retries: 2,
-          timeoutMs: 8000,
-        },
-      );
+      const data = await apiFetch("/auth/profile", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+        retries: 2,
+        timeoutMs: 8000,
+      });
       updateUser(data.user);
       setStatus("Данные компании обновлены.");
       closeProfileModal();
       reload().catch(() => {});
     } catch (saveError) {
-      setProfileError(saveError?.status === 401 ? "Пароль не подошёл для текущего аккаунта. Проверьте email и введите пароль от этого аккаунта." : saveError.message);
+      setProfileError(saveError.fields?.currentPassword || saveError.message);
     } finally {
       setProfileLoading(false);
     }
@@ -214,6 +229,13 @@ function CreatePage() {
   const changePassword = async (event) => {
     event.preventDefault();
     setProfileError("");
+
+    const validation = validatePassword(passwordForm.nextPassword, { field: "nextPassword", label: "Новый пароль" });
+
+    if (!validation.ok) {
+      setProfileError(validation.error);
+      return;
+    }
 
     if (passwordForm.nextPassword !== passwordForm.confirmPassword) {
       setProfileError("Пароли не совпадают.");
@@ -287,7 +309,10 @@ function CreatePage() {
           : "Измените контакты, описание, отрасль и теги компании.";
 
   if (loading) return null;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
 
   return (
     <Layout>
@@ -358,7 +383,7 @@ function CreatePage() {
                   <div>
                     <strong>{item.title}</strong>
                     <p>{item.company} · {item.city} · {item.budget}</p>
-                    <p className="muted">Уникальные просмотры: {item.viewsCount || 0}</p>
+                    <p className="muted">Просмотры: {item.viewsCount || 0}</p>
                   </div>
                   <div className="manage-actions">
                     <Link to={`/create/order?edit=${encodeURIComponent(item.id)}`} className="button button-secondary">
@@ -418,7 +443,7 @@ function CreatePage() {
               <form onSubmit={verifyProfilePassword} className="modal-form-grid">
                 <label className="field">
                   <span>Пароль</span>
-                  <input name="profilePassword" type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
+                  <input name="profilePassword" type="password" required maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="current-password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
                 </label>
                 <p className="form-helper">Пароль будет проверен при сохранении данных аккаунта: {user?.email || "email не определён"}.</p>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
@@ -432,9 +457,9 @@ function CreatePage() {
 
             {profileStep === "password" ? (
               <form onSubmit={changePassword} className="modal-form-grid">
-                <label className="field"><span>{"Текущий пароль"}</span><input name="currentPassword" type="password" value={passwordForm.currentPassword} onChange={(event) => updatePasswordField("currentPassword", event.target.value)} placeholder="Введите текущий пароль" /></label>
-                <label className="field"><span>{"Новый пароль"}</span><input name="nextPassword" type="password" value={passwordForm.nextPassword} onChange={(event) => updatePasswordField("nextPassword", event.target.value)} placeholder="Минимум 6 символов" /></label>
-                <label className="field"><span>{"Повторите новый пароль"}</span><input name="confirmNextPassword" type="password" value={passwordForm.confirmPassword} onChange={(event) => updatePasswordField("confirmPassword", event.target.value)} placeholder="Повторите пароль" /></label>
+                <label className="field"><span>{"Текущий пароль"}</span><input name="currentPassword" type="password" required value={passwordForm.currentPassword} onChange={(event) => updatePasswordField("currentPassword", event.target.value)} placeholder="Введите текущий пароль" /></label>
+                <label className="field"><span>{"Новый пароль"}</span><input name="nextPassword" type="password" required minLength={LIMITS.auth.passwordMinBytes} maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="new-password" value={passwordForm.nextPassword} onChange={(event) => updatePasswordField("nextPassword", event.target.value)} placeholder={`Минимум ${LIMITS.auth.passwordMinBytes} символов`} /></label>
+                <label className="field"><span>{"Повторите новый пароль"}</span><input name="confirmNextPassword" type="password" required minLength={LIMITS.auth.passwordMinBytes} maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => updatePasswordField("confirmPassword", event.target.value)} placeholder="Повторите пароль" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={() => setProfileStep("view")}>{"Назад"}</button>
@@ -449,7 +474,7 @@ function CreatePage() {
                   <strong>{"Удаление нельзя будет отменить."}</strong>
                   <p>{"Исчезнут данные компании, её объявления и чаты. Для подтверждения введите пароль."}</p>
                 </div>
-                <label className="field"><span>{"Пароль"}</span><input name="deleteCompanyPassword" type="password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} placeholder="Введите текущий пароль" /></label>
+                <label className="field"><span>{"Пароль"}</span><input name="deleteCompanyPassword" type="password" required maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="current-password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} placeholder="Введите текущий пароль" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={() => setProfileStep("view")}>{"Назад"}</button>
@@ -480,15 +505,15 @@ function CreatePage() {
                     </div>
                   ) : null}
                 </div>
-                <label className="field"><span>Контактное имя</span><input name="profileDisplayName" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
-                <label className="field"><span>Email</span><input name="profileEmail" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
-                <label className="field"><span>Название компании</span><input name="profileCompanyName" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
-                <label className="field"><span>Город</span><input name="profileCity" value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
-                <label className="field"><span>Телефон</span><input name="profilePhone" value={profileForm.phone} onChange={(event) => updateProfileField("phone", event.target.value)} placeholder="+7 (900) 000-00-00" /></label>
-                <label className="field"><span>Отрасль</span><input name="profileIndustry" value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
-                <label className="field field-wide"><span>Описание компании</span><textarea name="profileDescription" rows="4" value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
-                <label className="field field-wide"><span>О компании</span><textarea name="profileAbout" rows="5" value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
-                <label className="field field-wide"><span>Теги</span><input name="profileSpecializations" value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
+                <label className="field"><span>Контактное имя</span><input name="profileDisplayName" required maxLength={LIMITS.profile.displayNameMax} autoComplete="name" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
+                <label className="field"><span>Email</span><input name="profileEmail" type="email" required maxLength={LIMITS.auth.emailMax} autoComplete="email" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
+                <label className="field"><span>Название компании</span><input name="profileCompanyName" required maxLength={LIMITS.profile.companyNameMax} autoComplete="organization" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
+                <label className="field"><span>Город</span><input name="profileCity" required maxLength={LIMITS.profile.cityMax} autoComplete="address-level2" value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
+                <label className="field"><span>Телефон</span><input name="profilePhone" type="tel" maxLength={LIMITS.profile.phoneMax} autoComplete="tel" value={profileForm.phone} onChange={(event) => updateProfileField("phone", event.target.value)} placeholder="+7 (900) 000-00-00" /></label>
+                <label className="field"><span>Отрасль</span><input name="profileIndustry" required maxLength={LIMITS.profile.industryMax} value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
+                <label className="field field-wide"><span>Описание компании</span><textarea name="profileDescription" rows="4" required minLength={LIMITS.profile.descriptionMin} maxLength={LIMITS.profile.descriptionMax} value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
+                <label className="field field-wide"><span>О компании</span><textarea name="profileAbout" rows="5" required minLength={LIMITS.profile.aboutMin} maxLength={LIMITS.profile.aboutMax} value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
+                <label className="field field-wide"><span>Теги</span><input name="profileSpecializations" maxLength={LIMITS.profile.specializationsMax * (LIMITS.profile.specializationMax + 2)} value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>

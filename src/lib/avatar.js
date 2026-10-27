@@ -1,5 +1,8 @@
 export function getInitials(name) {
-  return String(name || "B2B").trim().slice(0, 2) || "B2B";
+  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "B2B";
+
+  return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
 }
 
 function clampPercent(value, fallback = 50) {

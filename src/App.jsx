@@ -8,6 +8,7 @@ import CreatePage from "./pages/CreatePage";
 import CreateOrderPage from "./pages/CreateOrderPage";
 import ChatsPage from "./pages/ChatsPage";
 import LoginPage from "./pages/LoginPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
       <Route path="/create/order" element={<CreateOrderPage />} />
       <Route path="/chats" element={<ChatsPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }

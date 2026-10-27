@@ -1,6 +1,7 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
+import AsyncState from "../components/AsyncState";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
@@ -8,10 +9,12 @@ import { apiFetch } from "../lib/api";
 function ListingPage() {
   const { id } = useParams();
   const { user } = useAuth();
-  const { orders, companies, reload } = useMarketplaceData();
+  const { orders, companies, loading, error, reload } = useMarketplaceData();
   const [viewsCount, setViewsCount] = useState(null);
   const viewedOrderIdsRef = useRef(new Set());
   const item = orders.find((entry) => entry.id === id);
+  const tags = Array.isArray(item?.tags) ? item.tags : [];
+  const isOwner = Boolean(user?.companyId && item?.companyId === user.companyId);
 
   useEffect(() => {
     if (item) {
@@ -20,7 +23,7 @@ function ListingPage() {
   }, [item]);
 
   useEffect(() => {
-    if (!item || viewedOrderIdsRef.current.has(item.id)) {
+    if (!item || isOwner || viewedOrderIdsRef.current.has(item.id)) {
       return;
     }
 
@@ -29,17 +32,26 @@ function ListingPage() {
     const registerView = async () => {
       try {
         const data = await apiFetch(`/orders/${item.id}/view`, { method: "POST" });
-        setViewsCount(data.viewsCount ?? 0);
-
-        if (user) {
-          await reload();
-        }
+        setViewsCount(data.viewsCount ?? item.viewsCount ?? 0);
       } catch {
+        // Просмотр не критичен: если запись не удалась, показываем прежний счётчик.
       }
     };
 
     registerView();
-  }, [item, reload, user]);
+  }, [item, isOwner]);
+
+  if (loading || error) {
+    return (
+      <Layout>
+        <section className="detail-section">
+          <div className="container">
+            <AsyncState loading={loading} error={error} onRetry={reload} loadingText="Загружаем объявление…" />
+          </div>
+        </section>
+      </Layout>
+    );
+  }
 
   if (!item) {
     return (
@@ -96,7 +108,7 @@ function ListingPage() {
                 <div className="detail-block">
                   <h3>Теги</h3>
                   <div className="card-tags">
-                    {item.tags.map((tag) => (
+                    {tags.map((tag) => (
                       <span key={tag} className="tag">
                         {tag}
                       </span>
@@ -116,7 +128,7 @@ function ListingPage() {
                   <strong>{item.date}</strong>
                 </div>
                 <div className="side-meta">
-                  <span>Уникальные просмотры</span>
+                  <span>Просмотры</span>
                   <strong>{effectiveViewsCount}</strong>
                 </div>
               </div>

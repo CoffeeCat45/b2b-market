@@ -4,28 +4,29 @@ import Layout from "../components/Layout";
 import SearchBar from "../components/SearchBar";
 import ListingCard from "../components/ListingCard";
 import CompanyCard from "../components/CompanyCard";
+import AsyncState from "../components/AsyncState";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
-import { parseRussianDate } from "../lib/date";
+import { parseDateValue } from "../lib/date";
 
 function HomePage() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [type, setType] = useState("orders");
-  const { orders, suppliers } = useMarketplaceData();
+  const { orders, suppliers, loading, error, reload } = useMarketplaceData();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
   const featuredOrders = useMemo(() => orders.slice(0, 6), [orders]);
   const featuredSuppliers = useMemo(() => suppliers.slice(0, 3), [suppliers]);
   const freshSuppliers = useMemo(() => {
     const sortedSuppliers = [...suppliers].sort((a, b) => (
-      (parseRussianDate(b.createdAt)?.getTime() || 0) - (parseRussianDate(a.createdAt)?.getTime() || 0)
+      (parseDateValue(b.createdAt)?.getTime() || 0) - (parseDateValue(a.createdAt)?.getTime() || 0)
     ));
 
     return sortedSuppliers.slice(0, 5);
   }, [suppliers]);
   const focusOrder = useMemo(() => {
     const freshestOrders = [...orders]
-      .sort((a, b) => (parseRussianDate(b.date)?.getTime() || 0) - (parseRussianDate(a.date)?.getTime() || 0))
+      .sort((a, b) => (parseDateValue(b.publishedAt ?? b.date)?.getTime() || 0) - (parseDateValue(a.publishedAt ?? a.date)?.getTime() || 0))
       .slice(0, 5);
 
     if (!freshestOrders.length) return null;
@@ -46,7 +47,8 @@ function HomePage() {
       params.set("q", query.trim());
     }
 
-    navigate(`${target}?${params.toString()}`);
+    const search = params.toString();
+    navigate(search ? `${target}?${search}` : target);
   };
 
   const openFeaturedOrder = () => {
@@ -91,15 +93,15 @@ function HomePage() {
             />
             <div className="hero-metrics">
               <div>
-                <strong>{orders.length}</strong>
+                <strong>{loading || error ? "—" : orders.length}</strong>
                 <span>объявлений в каталоге</span>
               </div>
               <div>
-                <strong>{suppliers.length}</strong>
+                <strong>{loading || error ? "—" : suppliers.length}</strong>
                 <span>активных поставщиков</span>
               </div>
               <div>
-                <strong>{categories.length}</strong>
+                <strong>{loading || error ? "—" : categories.length}</strong>
                 <span>основных категорий</span>
               </div>
             </div>
@@ -120,47 +122,57 @@ function HomePage() {
         </div>
       </section>
 
-      <section className="section-block">
-        <div className="container">
-          <div className="section-heading">
-            <h2>Популярные категории</h2>
+      {loading || error ? (
+        <section className="section-block">
+          <div className="container">
+            <AsyncState loading={loading} error={error} onRetry={reload} loadingText="Загружаем каталог…" />
           </div>
-          <div className="category-grid">
-            {categories.map((category) => (
-              <button key={category} type="button" className="category-card card-clickable" onClick={() => openCategory(category)}>
-                <h3>{category}</h3>
-                <p>Подбор подрядчиков и предложений в категории {category.toLowerCase()}.</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
+        </section>
+      ) : (
+        <>
+          <section className="section-block">
+            <div className="container">
+              <div className="section-heading">
+                <h2>Популярные категории</h2>
+              </div>
+              <div className="category-grid">
+                {categories.map((category) => (
+                  <button key={category} type="button" className="category-card card-clickable" onClick={() => openCategory(category)}>
+                    <h3>{category}</h3>
+                    <p>Подбор подрядчиков и предложений в категории {category.toLowerCase()}.</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
 
-      <section className="section-block section-muted">
-        <div className="container">
-          <div className="section-heading">
-            <h2>Актуальные заказы</h2>
-          </div>
-          <div className="cards-grid cards-grid-wide">
-            {featuredOrders.map((item) => (
-              <ListingCard key={item.id} item={item} featured />
-            ))}
-          </div>
-        </div>
-      </section>
+          <section className="section-block section-muted">
+            <div className="container">
+              <div className="section-heading">
+                <h2>Актуальные заказы</h2>
+              </div>
+              <div className="cards-grid cards-grid-wide">
+                {featuredOrders.map((item) => (
+                  <ListingCard key={item.id} item={item} featured />
+                ))}
+              </div>
+            </div>
+          </section>
 
-      <section className="section-block">
-        <div className="container">
-          <div className="section-heading">
-            <h2>Проверенные поставщики</h2>
-          </div>
-          <div className="cards-grid suppliers-grid">
-            {featuredSuppliers.map((item) => (
-              <CompanyCard key={item.id} supplier={item} />
-            ))}
-          </div>
-        </div>
-      </section>
+          <section className="section-block">
+            <div className="container">
+              <div className="section-heading">
+                <h2>Проверенные поставщики</h2>
+              </div>
+              <div className="cards-grid suppliers-grid">
+                {featuredSuppliers.map((item) => (
+                  <CompanyCard key={item.id} supplier={item} />
+                ))}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
     </Layout>
   );
 }

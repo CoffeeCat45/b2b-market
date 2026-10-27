@@ -2,9 +2,24 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api").replace(/\/$/, "");
 const API_TIMEOUT_MS = 20000;
 const RETRY_DELAY_MS = 700;
+const SESSION_EXEMPT_PATHS = new Set([
+  "/auth/login",
+  "/auth/register",
+  "/auth/me",
+  "/auth/verify-password",
+  "/auth/password",
+  "/auth/company",
+  "/auth/profile",
+]);
 
 function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function expireSession() {
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("auth_user_cache");
+  window.dispatchEvent(new Event("auth:expired"));
 }
 
 export async function apiFetch(path, options = {}) {
@@ -34,11 +49,15 @@ export async function apiFetch(path, options = {}) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      const message = String(data.message || "Ошибка запроса.");
-      const details = String(data.error || "").trim();
-      const requestError = new Error(details ? `${message} ${details}` : message);
+      const requestError = new Error(String(data.message || "Ошибка запроса."));
       requestError.status = response.status;
       requestError.data = data;
+      requestError.fields = data.fields && typeof data.fields === "object" ? data.fields : null;
+
+      if (response.status === 401 && token && !skipAuth && !SESSION_EXEMPT_PATHS.has(path.split("?")[0])) {
+        expireSession();
+      }
+
       throw requestError;
     }
 
@@ -62,17 +81,4 @@ export async function apiFetch(path, options = {}) {
   } finally {
     window.clearTimeout(timeoutId);
   }
-}
-
-export function apiPlainPost(path, payload, options = {}) {
-  const token = localStorage.getItem("auth_token");
-
-  return apiFetch(path, {
-    method: "POST",
-    skipAuth: true,
-    retries: options.retries || 0,
-    timeoutMs: options.timeoutMs || API_TIMEOUT_MS,
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify({ ...payload, authToken: token }),
-  });
 }

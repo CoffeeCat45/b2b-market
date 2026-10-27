@@ -3,10 +3,12 @@ import { Link, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import Tabs from "../components/Tabs";
 import ListingCard from "../components/ListingCard";
+import AsyncState from "../components/AsyncState";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
+import { LIMITS } from "../../shared/validation.js";
 
 function formatReviewDate(value) {
   if (!value) return "";
@@ -36,13 +38,14 @@ function CompanyPage() {
   const [reviewError, setReviewError] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
   const { user } = useAuth();
-  const { companies, orders, reload } = useMarketplaceData();
+  const { companies, orders, loading, error, reload } = useMarketplaceData();
   const company = companies.find((entry) => entry.id === id);
   const companyOrders = useMemo(() => orders.filter((item) => item.companyId === id), [orders, id]);
   const contactPath = `/chats?chatCompany=${encodeURIComponent(id)}`;
   const contactHref = user ? contactPath : `/login?next=${encodeURIComponent(contactPath)}`;
   const canLeaveReview = Boolean(user?.companyId) && user.companyId !== id;
   const reviews = Array.isArray(company?.reviews) ? company.reviews : [];
+  const specializations = Array.isArray(company?.specializations) ? company.specializations : [];
   const canViewCompanyData = Boolean(user);
 
   const submitReview = async (event) => {
@@ -56,17 +59,23 @@ function CompanyPage() {
       return;
     }
 
+    if (normalized.length > LIMITS.review.textMax) {
+      setReviewError(`Текст отзыва должен быть не длиннее ${LIMITS.review.textMax} символов.`);
+      setReviewStatus("");
+      return;
+    }
+
     try {
       setSubmittingReview(true);
       setReviewError("");
       setReviewStatus("");
-      await apiFetch(`/companies/${company.id}/reviews`, {
+      const data = await apiFetch(`/companies/${company.id}/reviews`, {
         method: "POST",
         body: JSON.stringify({ text: normalized, rating: reviewRating }),
       });
       setReviewText("");
       setReviewRating(5);
-      setReviewStatus("Отзыв опубликован.");
+      setReviewStatus(data.updated ? "Отзыв обновлён." : "Отзыв опубликован.");
       await reload();
     } catch (error) {
       setReviewError(error.message);
@@ -75,6 +84,18 @@ function CompanyPage() {
       setSubmittingReview(false);
     }
   };
+
+  if (loading || error) {
+    return (
+      <Layout>
+        <section className="detail-section">
+          <div className="container">
+            <AsyncState loading={loading} error={error} onRetry={reload} loadingText="Загружаем профиль компании…" />
+          </div>
+        </section>
+      </Layout>
+    );
+  }
 
   if (!company) {
     return (
@@ -105,7 +126,7 @@ function CompanyPage() {
                 <span>{company.city}</span>
                 {company.createdAt ? <span>На платформе с {company.createdAt}</span> : null}
                 <span>★ {company.rating}</span>
-                <span>{company.specializations.join(" · ")}</span>
+                <span>{specializations.join(" · ")}</span>
               </div>
               <p>{company.description}</p>
             </div>
@@ -133,11 +154,17 @@ function CompanyPage() {
           ) : null}
           {activeTab === "listings" ? (
             <section className="tab-panel">
-              <div className="cards-grid">
-                {companyOrders.map((item) => (
-                  <ListingCard key={item.id} item={item} />
-                ))}
-              </div>
+              {companyOrders.length ? (
+                <div className="cards-grid">
+                  {companyOrders.map((item) => (
+                    <ListingCard key={item.id} item={item} />
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state card">
+                  <p>У компании пока нет объявлений.</p>
+                </div>
+              )}
             </section>
           ) : null}
           {activeTab === "reviews" ? (
@@ -154,6 +181,7 @@ function CompanyPage() {
                           type="button"
                           className={value <= reviewRating ? "review-star-button active" : "review-star-button"}
                           onClick={() => setReviewRating(value)}
+                          disabled={submittingReview}
                           aria-label={`Поставить ${value} ${value === 1 ? "звезду" : value < 5 ? "звезды" : "звёзд"}`}
                         >
                           ★
@@ -163,11 +191,16 @@ function CompanyPage() {
                   </div>
                   <div className="field">
                     <span>Оставить отзыв</span>
-                    <textarea name="reviewText" rows="5"
+                    <textarea
+                      name="reviewText"
+                      rows="5"
+                      maxLength={LIMITS.review.textMax}
                       value={reviewText}
                       onChange={(event) => setReviewText(event.target.value)}
                       placeholder="Опишите впечатления от сотрудничества, коммуникации и результата."
+                      disabled={submittingReview}
                     />
+                    <span className="field-hint">{reviewText.length}/{LIMITS.review.textMax}</span>
                   </div>
                   {reviewError ? <div className="error-banner">{reviewError}</div> : null}
                   {reviewStatus ? <div className="success-banner">{reviewStatus}</div> : null}
@@ -233,7 +266,7 @@ function CompanyPage() {
                   </div>
                   <div className="company-data-wide">
                     <span>Теги</span>
-                    <strong>{company.specializations.join(" · ") || "Не указано"}</strong>
+                    <strong>{specializations.join(" · ") || "Не указано"}</strong>
                   </div>
                   <div className="company-data-wide">
                     <span>Описание компании</span>

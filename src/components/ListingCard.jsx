@@ -1,6 +1,7 @@
 ﻿import { Link } from "react-router-dom";
 
 function ListingCard({ item, featured = false, onTagClick }) {
+  const tags = Array.isArray(item.tags) ? item.tags : [];
   const openCard = () => {
     window.open(`#/listing/${item.id}`, "_blank", "noopener,noreferrer");
   };
@@ -31,7 +32,7 @@ function ListingCard({ item, featured = false, onTagClick }) {
       </div>
       <p>{item.summary}</p>
       <div className="card-tags">
-        {item.tags.map((tag) => (
+        {tags.map((tag) => (
           onTagClick ? (
             <button
               key={tag}
