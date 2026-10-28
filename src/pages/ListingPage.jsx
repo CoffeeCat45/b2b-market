@@ -70,6 +70,8 @@ function ListingPage() {
   const company = companies.find((entry) => entry.id === item.companyId);
   const chatPath = `/chats?chatCompany=${encodeURIComponent(item.companyId)}&orderId=${encodeURIComponent(item.id)}`;
   const chatHref = user ? chatPath : `/login?next=${encodeURIComponent(chatPath)}`;
+  const isOwnOrder = Boolean(user?.companyId && item.companyId === user.companyId);
+  const canContact = Boolean(user?.companyId && !isOwnOrder);
   const effectiveViewsCount = viewsCount ?? item.viewsCount ?? 0;
 
   return (
@@ -120,9 +122,15 @@ function ListingPage() {
             <aside className="detail-side">
               <div className="card sticky-card">
                 <strong className="price">{item.budget}</strong>
-                <Link to={chatHref} className="button button-primary button-block">
-                  Написать
-                </Link>
+                {canContact || !user ? (
+                  <Link to={chatHref} className="button button-primary button-block">
+                    Написать
+                  </Link>
+                ) : (
+                  <p className="muted">
+                    {isOwnOrder ? "Это ваше объявление." : "Чат доступен только аккаунтам компаний."}
+                  </p>
+                )}
                 <div className="side-meta">
                   <span>Дата публикации</span>
                   <strong>{item.date}</strong>

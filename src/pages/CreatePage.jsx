@@ -3,6 +3,7 @@ import { Navigate, Link, useLocation, useNavigate, useSearchParams } from "react
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
+import { parseDateValue } from "../lib/date";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { LIMITS, validatePassword, validateProfilePayload } from "../../shared/validation.js";
@@ -54,9 +55,12 @@ function CreatePage() {
   const editableOrders = useMemo(() => {
     if (!user) return [];
     const source = user.role === "admin" ? orders : orders.filter((item) => item.companyId === user.companyId);
-    if (!adminSearch.trim()) return source;
+    const sorted = [...source].sort((a, b) => (
+      (parseDateValue(b.publishedAt ?? b.date)?.getTime() || 0) - (parseDateValue(a.publishedAt ?? a.date)?.getTime() || 0)
+    ));
+    if (!adminSearch.trim()) return sorted;
     const q = adminSearch.toLowerCase();
-    return source.filter((item) => `${item.title} ${item.company}`.toLowerCase().includes(q));
+    return sorted.filter((item) => `${item.title} ${item.company}`.toLowerCase().includes(q));
   }, [orders, user, adminSearch]);
 
   const adminSuggestions = useMemo(() => {
@@ -166,7 +170,7 @@ function CreatePage() {
 
   const updatePasswordField = (field, value) => setPasswordForm((current) => ({ ...current, [field]: value }));
 
-  const verifyProfilePassword = (event) => {
+  const verifyProfilePassword = async (event) => {
     event.preventDefault();
     setProfileError("");
 
@@ -175,7 +179,19 @@ function CreatePage() {
       return;
     }
 
-    setProfileStep("edit");
+    setProfileLoading(true);
+
+    try {
+      await apiFetch("/auth/verify-password", {
+        method: "POST",
+        body: JSON.stringify({ password: profilePassword }),
+      });
+      setProfileStep("edit");
+    } catch (verifyError) {
+      setProfileError(verifyError.fields?.password || verifyError.message);
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   const saveProfile = async (event) => {
@@ -279,6 +295,8 @@ function CreatePage() {
   };
 
   const removeOrder = async (id) => {
+    if (!window.confirm("Удалить объявление? Действие нельзя отменить.")) return;
+
     try {
       await apiFetch(`/orders/${id}`, { method: "DELETE" });
       setStatus("Объявление удалено.");
@@ -445,7 +463,7 @@ function CreatePage() {
                   <span>Пароль</span>
                   <input name="profilePassword" type="password" required maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="current-password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Введите текущий пароль" />
                 </label>
-                <p className="form-helper">Пароль будет проверен при сохранении данных аккаунта: {user?.email || "email не определён"}.</p>
+                <p className="form-helper">Пароль будет проверен перед переходом к редактированию: {user?.email || "email не определён"}.</p>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>
@@ -457,7 +475,7 @@ function CreatePage() {
 
             {profileStep === "password" ? (
               <form onSubmit={changePassword} className="modal-form-grid">
-                <label className="field"><span>{"Текущий пароль"}</span><input name="currentPassword" type="password" required value={passwordForm.currentPassword} onChange={(event) => updatePasswordField("currentPassword", event.target.value)} placeholder="Введите текущий пароль" /></label>
+                <label className="field"><span>{"Текущий пароль"}</span><input name="currentPassword" type="password" required maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => updatePasswordField("currentPassword", event.target.value)} placeholder="Введите текущий пароль" /></label>
                 <label className="field"><span>{"Новый пароль"}</span><input name="nextPassword" type="password" required minLength={LIMITS.auth.passwordMinBytes} maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="new-password" value={passwordForm.nextPassword} onChange={(event) => updatePasswordField("nextPassword", event.target.value)} placeholder={`Минимум ${LIMITS.auth.passwordMinBytes} символов`} /></label>
                 <label className="field"><span>{"Повторите новый пароль"}</span><input name="confirmNextPassword" type="password" required minLength={LIMITS.auth.passwordMinBytes} maxLength={LIMITS.auth.passwordMaxBytes} autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => updatePasswordField("confirmPassword", event.target.value)} placeholder="Повторите пароль" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
@@ -505,7 +523,7 @@ function CreatePage() {
                     </div>
                   ) : null}
                 </div>
-                <label className="field"><span>Контактное имя</span><input name="profileDisplayName" required maxLength={LIMITS.profile.displayNameMax} autoComplete="name" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
+                <label className="field"><span>Контактное имя</span><input name="profileDisplayName" required maxLength={LIMITS.profile.displayNameMax} autoComplete="name" autoCapitalize="words" spellCheck={false} lang="ru" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
                 <label className="field"><span>Email</span><input name="profileEmail" type="email" required maxLength={LIMITS.auth.emailMax} autoComplete="email" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
                 <label className="field"><span>Название компании</span><input name="profileCompanyName" required maxLength={LIMITS.profile.companyNameMax} autoComplete="organization" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
                 <label className="field"><span>Город</span><input name="profileCity" required maxLength={LIMITS.profile.cityMax} autoComplete="address-level2" value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>

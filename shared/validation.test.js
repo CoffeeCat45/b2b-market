@@ -9,6 +9,8 @@ import {
   validateMessagePayload,
   validateOrderPayload,
   validatePassword,
+  validateProfilePayload,
+  validateRegisterPayload,
   validateReviewPayload,
 } from "./validation.js";
 import { formatDisplayDate, matchesDateFilter, parseDateValue } from "./dates.js";
@@ -80,6 +82,36 @@ test("слишком много тегов — ошибка", () => {
 test("пароль короче 8 байт не принимается", () => {
   assert.equal(validatePassword("short").ok, false);
   assert.equal(validatePassword("12345678").ok, true);
+});
+
+test("кириллица в контактном имени принимается при регистрации и в профиле", () => {
+  const register = validateRegisterPayload({
+    companyName: "ООО Тест",
+    displayName: "Иван Петров",
+    city: "Москва",
+    industry: "IT",
+    email: "test@example.ru",
+    password: "12345678",
+  });
+
+  assert.equal(register.ok, true);
+  assert.equal(register.value.displayName, "Иван Петров");
+
+  const profile = validateProfilePayload({
+    displayName: "Анна-Мария Соколова",
+    email: "test@example.ru",
+    currentPassword: "12345678",
+    companyName: "ООО Тест",
+    city: "Москва",
+    phone: "",
+    industry: "IT",
+    description: "Описание компании",
+    about: "О компании подробнее",
+    specializations: ["Опт", "Розница"],
+  });
+
+  assert.equal(profile.ok, true);
+  assert.equal(profile.value.displayName, "Анна-Мария Соколова");
 });
 
 test("data URL считается по base64 без заглушек", () => {

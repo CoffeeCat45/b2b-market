@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
+import AsyncState from "../components/AsyncState";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
@@ -26,7 +27,12 @@ function CreateOrderPage() {
   const [cityFocused, setCityFocused] = useState(false);
 
   const editId = searchParams.get("edit");
-  const editingOrder = useMemo(() => orders.find((item) => item.id === editId) || null, [orders, editId]);
+  const editingOrder = useMemo(() => {
+    const found = orders.find((item) => item.id === editId) || null;
+    if (!found) return null;
+    if (user && user.role !== "admin" && found.companyId !== user.companyId) return null;
+    return found;
+  }, [orders, editId, user]);
   const isEditing = Boolean(editId);
   const categorySuggestions = useMemo(
     () => [...new Set(orders.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
@@ -39,6 +45,11 @@ function CreateOrderPage() {
     ].filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
     [orders, companies],
   );
+  const visibleCitySuggestions = useMemo(() => {
+    const normalized = form.cityMajor.trim().toLowerCase();
+    if (!normalized) return citySuggestions.slice(0, 8);
+    return citySuggestions.filter((city) => city.toLowerCase().includes(normalized)).slice(0, 8);
+  }, [citySuggestions, form.cityMajor]);
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -110,7 +121,18 @@ function CreateOrderPage() {
     }
   };
 
-  if (loading || dataLoading) return null;
+  if (loading || dataLoading) {
+    return (
+      <Layout>
+        <section className="form-section">
+          <div className="container dashboard-main-only">
+            <AsyncState loading loadingText="Загружаем объявление…" />
+          </div>
+        </section>
+      </Layout>
+    );
+  }
+
   if (!user) {
     const next = `${location.pathname}${location.search}`;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
@@ -226,9 +248,9 @@ function CreateOrderPage() {
                   placeholder="Город размещения"
                   autoComplete="off"
                 />
-                {cityFocused && citySuggestions.length ? (
+                {cityFocused && visibleCitySuggestions.length ? (
                   <div className="field-suggestions">
-                    {citySuggestions.map((city) => (
+                    {visibleCitySuggestions.map((city) => (
                       <button
                         key={city}
                         type="button"

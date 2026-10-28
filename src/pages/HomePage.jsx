@@ -15,7 +15,11 @@ function HomePage() {
   const { orders, suppliers, loading, error, reload } = useMarketplaceData();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
-  const featuredOrders = useMemo(() => orders.slice(0, 6), [orders]);
+  const featuredOrders = useMemo(() => (
+    [...orders]
+      .sort((a, b) => (parseDateValue(b.publishedAt ?? b.date)?.getTime() || 0) - (parseDateValue(a.publishedAt ?? a.date)?.getTime() || 0))
+      .slice(0, 6)
+  ), [orders]);
   const featuredSuppliers = useMemo(() => suppliers.slice(0, 3), [suppliers]);
   const freshSuppliers = useMemo(() => {
     const sortedSuppliers = [...suppliers].sort((a, b) => (

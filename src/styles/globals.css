@@ -1780,6 +1780,20 @@ main {
   padding-right: 4px;
 }
 
+.chat-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 12px;
+}
+
+.chat-messages-status {
+  margin: 0;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
 .chat-message-group {
   display: grid;
   gap: 10px;

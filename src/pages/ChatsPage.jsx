@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
+import { parseDateValue } from "../lib/date";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { LIMITS, validateAttachments } from "../../shared/validation.js";
 
@@ -13,6 +14,14 @@ const CHAT_STATUS_OPTIONS = [
   { value: "archived", label: "В архиве" },
 ];
 const CHAT_STATUS_LABELS = Object.fromEntries(CHAT_STATUS_OPTIONS.map((item) => [item.value, item.label]));
+
+function formatChatMoment(isoValue, fallback = "") {
+  const date = parseDateValue(isoValue);
+  if (!date) return fallback;
+
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -51,11 +60,17 @@ function formatOfferDetails({ price, timeline, comment }) {
 }
 
 function getLastMessagePreview(chat) {
-  const lastMessage = chat.messages?.[chat.messages.length - 1];
-  if (!lastMessage) return chat.contractTitle;
-  if (lastMessage.text) return lastMessage.text;
-  if (lastMessage.attachments?.length) return `Вложений: ${lastMessage.attachments.length}`;
-  return chat.contractTitle;
+  return chat.lastMessagePreview || chat.contractTitle;
+}
+
+function mergeChatMessages(current, incoming) {
+  const byId = new Map(current.map((message) => [message.id, message]));
+  incoming.forEach((message) => byId.set(message.id, message));
+
+  return [...byId.values()].sort((left, right) => {
+    const timeDiff = (Date.parse(left.createdAtIso || "") || 0) - (Date.parse(right.createdAtIso || "") || 0);
+    return timeDiff || String(left.id).localeCompare(String(right.id));
+  });
 }
 
 function getChatBaseStatus(chat) {
@@ -120,6 +135,10 @@ function ChatsPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [chats, setChats] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [messagesHasMore, setMessagesHasMore] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState(searchParams.get("chatId") || null);
   const [sidebarMode, setSidebarMode] = useState("active");
   const [messageDraft, setMessageDraft] = useState("");
@@ -140,6 +159,12 @@ function ChatsPage() {
   const fileInputRef = useRef(null);
   const messageInputRef = useRef(null);
   const openingChatRef = useRef("");
+  const messagesContainerRef = useRef(null);
+  const chatMessagesRef = useRef([]);
+  const messagesRequestRef = useRef(0);
+  const newMessagesLoadingRef = useRef(false);
+  const scrollToBottomRef = useRef(false);
+  const preserveScrollRef = useRef(null);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 820px)");
@@ -162,6 +187,128 @@ function ChatsPage() {
     }
   }, []);
 
+  const loadMessages = useCallback(async (chatId, { mode = "initial", beforeId = "", silent = false } = {}) => {
+    if (!chatId) return;
+
+    const requestId = messagesRequestRef.current + 1;
+    messagesRequestRef.current = requestId;
+
+    if (mode === "older") {
+      setOlderMessagesLoading(true);
+    } else if (!silent) {
+      setMessagesLoading(true);
+    }
+
+    if (mode !== "older") {
+      preserveScrollRef.current = null;
+    }
+
+    try {
+      const params = new URLSearchParams();
+      if (beforeId) {
+        params.set("beforeId", beforeId);
+      }
+      const query = params.toString();
+      const data = await apiFetch(`/chats/${chatId}/messages${query ? `?${query}` : ""}`);
+
+      if (messagesRequestRef.current !== requestId) return;
+
+      if (mode === "older") {
+        setChatMessages((current) => mergeChatMessages(data.messages, current));
+        setMessagesHasMore(Boolean(data.hasMore));
+      } else if (mode === "refresh") {
+        setChatMessages((current) => mergeChatMessages(current, data.messages));
+        if (!chatMessagesRef.current.length) {
+          setMessagesHasMore(Boolean(data.hasMore));
+        }
+      } else {
+        setChatMessages(data.messages);
+        setMessagesHasMore(Boolean(data.hasMore));
+      }
+    } catch (loadError) {
+      if (messagesRequestRef.current === requestId) {
+        if (mode === "older") preserveScrollRef.current = null;
+        if (!silent) setError(loadError.message);
+      }
+    } finally {
+      if (messagesRequestRef.current === requestId) {
+        if (mode !== "older" && !silent) setMessagesLoading(false);
+        setOlderMessagesLoading(false);
+      }
+    }
+  }, []);
+
+  const loadNewMessages = useCallback(async (chatId) => {
+    if (!chatId || newMessagesLoadingRef.current) return;
+
+    const lastMessage = chatMessagesRef.current[chatMessagesRef.current.length - 1];
+    if (!lastMessage) {
+      newMessagesLoadingRef.current = true;
+      try {
+        await loadMessages(chatId, { mode: "initial", silent: true });
+      } finally {
+        newMessagesLoadingRef.current = false;
+      }
+      return;
+    }
+    const requestId = messagesRequestRef.current;
+    newMessagesLoadingRef.current = true;
+
+    try {
+      const params = new URLSearchParams({ afterId: lastMessage.id });
+      const data = await apiFetch(`/chats/${chatId}/messages?${params.toString()}`);
+
+      if (messagesRequestRef.current !== requestId || !data.messages?.length) return;
+
+      const container = messagesContainerRef.current;
+      if (container) {
+        scrollToBottomRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+      }
+
+      setChatMessages((current) => mergeChatMessages(current, data.messages));
+    } catch {
+      // Ошибки фонового опроса не должны перекрывать открытый чат.
+    } finally {
+      newMessagesLoadingRef.current = false;
+    }
+  }, [loadMessages]);
+
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
+
+  useEffect(() => {
+    messagesRequestRef.current += 1;
+    newMessagesLoadingRef.current = false;
+    setChatMessages([]);
+    setMessagesHasMore(false);
+    setMessagesLoading(Boolean(selectedChatId));
+    setOlderMessagesLoading(false);
+    scrollToBottomRef.current = true;
+    preserveScrollRef.current = null;
+
+    if (selectedChatId) {
+      loadMessages(selectedChatId);
+    }
+  }, [selectedChatId, loadMessages]);
+
+  useLayoutEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const preserve = preserveScrollRef.current;
+    if (preserve) {
+      container.scrollTop = container.scrollHeight - preserve.height + preserve.top;
+      preserveScrollRef.current = null;
+      return;
+    }
+
+    if (scrollToBottomRef.current) {
+      container.scrollTop = container.scrollHeight;
+      scrollToBottomRef.current = false;
+    }
+  }, [chatMessages, selectedChatId]);
+
   useEffect(() => {
     if (user) {
       loadChats();
@@ -170,11 +317,20 @@ function ChatsPage() {
 
   useEffect(() => {
     if (!user) return undefined;
-    const intervalId = window.setInterval(() => {
+
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
       loadChats();
-    }, 4000);
-    return () => window.clearInterval(intervalId);
-  }, [user, loadChats]);
+      if (selectedChatId) loadNewMessages(selectedChatId);
+    };
+    const intervalId = window.setInterval(refresh, 4000);
+    document.addEventListener("visibilitychange", refresh);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [user, selectedChatId, loadChats, loadNewMessages]);
 
   useEffect(() => {
     const closeMenu = () => setContextMenu(null);
@@ -334,15 +490,32 @@ function ChatsPage() {
   }, [messageDraft, selectedChatId]);
 
   const firstUnreadIndex = useMemo(() => {
-    if (!selectedChat || !user?.companyId || !selectedChat.messages?.length || !selectedChat.unreadCount) return -1;
+    if (!selectedChat || !user?.companyId || !chatMessages.length || !selectedChat.unreadCount) return -1;
 
     const lastReadTime = selectedChat.lastReadAtIso ? Date.parse(selectedChat.lastReadAtIso) : 0;
 
-    return selectedChat.messages.findIndex((message) => (
+    return chatMessages.findIndex((message) => (
       message.senderCompanyId !== user.companyId
       && Date.parse(message.createdAtIso || "") > lastReadTime
     ));
-  }, [selectedChat, user]);
+  }, [selectedChat, user, chatMessages]);
+
+  const loadOlderMessages = async () => {
+    if (!selectedChatId || !chatMessages.length || olderMessagesLoading) return;
+
+    const firstMessage = chatMessages[0];
+    if (!firstMessage?.id) return;
+
+    const container = messagesContainerRef.current;
+    if (container) {
+      preserveScrollRef.current = { height: container.scrollHeight, top: container.scrollTop };
+    }
+
+    await loadMessages(selectedChatId, {
+      mode: "older",
+      beforeId: firstMessage.id,
+    });
+  };
 
   const persistChatDetails = useCallback(async (chatId, changes) => {
     if (!Object.keys(changes).length) return;
@@ -568,7 +741,9 @@ function ChatsPage() {
       setDetailsStatus("");
       setOfferedDirty(false);
       setAgreementDirty(false);
+      scrollToBottomRef.current = true;
       await loadChats();
+      await loadMessages(selectedChat.id, { mode: "refresh" });
     } catch (messageError) {
       setError(messageError.fields ? Object.values(messageError.fields)[0] : messageError.message);
     }
@@ -673,7 +848,7 @@ function ChatsPage() {
                       <span className="chat-room-preview">{getLastMessagePreview(chat)}</span>
                     </span>
                     <span className="chat-room-meta">
-                      <span className="chat-room-time">{chat.lastActivityAt}</span>
+                      <span className="chat-room-time">{formatChatMoment(chat.lastActivityAtIso, chat.lastActivityAt)}</span>
                       {chat.unreadCount ? <span className="chat-unread-badge">{chat.unreadCount}</span> : null}
                     </span>
                   </button>
@@ -761,8 +936,21 @@ function ChatsPage() {
                       <Link to={`/listing/${selectedChat.orderId}`} className="chat-order-link">Перейти в объявление</Link>
                     </div>
                   ) : null}
-                  <div className="chat-window-messages">
-                    {selectedChat.messages.map((message, index) => (
+                  <div className="chat-window-messages" ref={messagesContainerRef}>
+                    {messagesHasMore ? (
+                      <div className="chat-load-more">
+                        <button type="button" className="button button-secondary" onClick={loadOlderMessages} disabled={olderMessagesLoading}>
+                          {olderMessagesLoading ? "Загружаем…" : "Показать ранее"}
+                        </button>
+                      </div>
+                    ) : null}
+                    {messagesLoading && !chatMessages.length ? (
+                      <p className="chat-messages-status">Загружаем сообщения…</p>
+                    ) : null}
+                    {!messagesLoading && !chatMessages.length ? (
+                      <p className="chat-messages-status">Сообщений пока нет.</p>
+                    ) : null}
+                    {chatMessages.map((message, index) => (
                       <div key={message.id} className="chat-message-group">
                         {firstUnreadIndex === index ? <div className="chat-unread-divider">Непрочитанные сообщения</div> : null}
                         <article className={message.senderCompanyId === user.companyId ? "chat-bubble own" : "chat-bubble"}>
@@ -776,7 +964,7 @@ function ChatsPage() {
                               ))}
                             </div>
                           ) : null}
-                          <span className="chat-message-time">{message.createdAt}</span>
+                          <span className="chat-message-time">{formatChatMoment(message.createdAtIso, message.createdAt)}</span>
                         </article>
                       </div>
                     ))}

@@ -238,6 +238,19 @@ async function getChatForUser(chatId, user) {
   return result.rows[0] ?? null;
 }
 
+async function findChatByPair(executor, companyId, otherCompanyId, orderId) {
+  const result = await executor.query(
+    `SELECT id
+     FROM chats
+     WHERE LEAST(company_a_id, company_b_id) = LEAST($1::text, $2::text)
+       AND GREATEST(company_a_id, company_b_id) = GREATEST($1::text, $2::text)
+       AND COALESCE(order_id, '') = COALESCE($3::text, '')
+     LIMIT 1`,
+    [companyId, otherCompanyId, orderId],
+  );
+  return result.rows[0] ?? null;
+}
+
 // Сервисные и auth-маршруты.
 app.get("/api/health", async (_req, res) => {
   try {
@@ -292,9 +305,10 @@ app.get("/api/industries", async (_req, res) => {
 });
 
 app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
-  const client = await pool.connect();
+  let client;
 
   try {
+    client = await pool.connect();
     const validation = validateRegisterPayload(req.body || {});
     if (!validation.ok) return sendValidationError(res, validation);
 
@@ -362,18 +376,23 @@ app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
       },
     });
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+    }
     if (isUniqueViolation(error)) {
       return res.status(409).json({ message: "Пользователь с таким email уже существует.", fields: { email: "Этот email уже занят." } });
     }
     serverError(res, "Не удалось зарегистрировать аккаунт.", error);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
     const result = await pool.query(
       `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale"
        FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.email = $1`,
@@ -456,14 +475,16 @@ app.put("/api/auth/password", authMiddleware, async (req, res) => {
 });
 
 app.delete("/api/auth/company", authMiddleware, async (req, res) => {
-  const client = await pool.connect();
+  let client;
 
   try {
+    client = await pool.connect();
+
     if (req.user.role !== "company" || !req.user.companyId) {
       return res.status(403).json({ message: "Удалить можно только аккаунт компании." });
     }
 
-    const password = String(req.body.password || "");
+    const password = String(req.body?.password || "");
     const result = await client.query("SELECT password FROM users WHERE id = $1", [req.user.id]);
     const storedPassword = result.rows[0]?.password || "";
     const passwordOk = await verifyPassword(storedPassword, password);
@@ -480,10 +501,15 @@ app.delete("/api/auth/company", authMiddleware, async (req, res) => {
 
     res.json({ ok: true });
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+    }
     serverError(res, "Не удалось удалить компанию.", error);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
@@ -724,6 +750,10 @@ app.post("/api/orders/:id/view", optionalAuthMiddleware, async (req, res) => {
 
 // Сценарий переговоров с chat-first логикой.
 app.post("/api/chats/open", authMiddleware, async (req, res) => {
+  let client;
+  let otherCompanyId = "";
+  let orderId = null;
+
   try {
     if (!req.user.companyId) {
       return res.status(403).json({ message: "Только компания может открывать чаты." });
@@ -732,8 +762,10 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
     const validation = validateChatOpenPayload(req.body || {});
     if (!validation.ok) return sendValidationError(res, validation);
 
-    const { companyId: otherCompanyId, orderId: rawOrderId, subject: rawSubject } = validation.value;
-    const orderId = rawOrderId || null;
+    const parsed = validation.value;
+    otherCompanyId = parsed.companyId;
+    orderId = parsed.orderId || null;
+    let subject = parsed.subject;
 
     if (otherCompanyId === req.user.companyId) {
       return res.status(400).json({ message: "Нельзя открыть чат со своей компанией." });
@@ -742,9 +774,6 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
     const otherCompany = await pool.query("SELECT id FROM companies WHERE id = $1", [otherCompanyId]);
     if (!otherCompany.rows[0]) return res.status(404).json({ message: "Компания для чата не найдена." });
 
-    let subject = rawSubject;
-    let orderDetails = null;
-
     if (orderId) {
       const orderResult = await pool.query(
         `SELECT id, company_id AS "companyId", title, budget_label AS budget, summary, terms
@@ -752,7 +781,7 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
          WHERE id = $1`,
         [orderId],
       );
-      orderDetails = orderResult.rows[0] ?? null;
+      const orderDetails = orderResult.rows[0] ?? null;
       if (!orderDetails) return res.status(404).json({ message: "Объявление не найдено." });
       if (orderDetails.companyId !== otherCompanyId) {
         return res.status(400).json({ message: "Объявление принадлежит другой компании.", fields: { companyId: "Выберите компанию, которой принадлежит объявление." } });
@@ -764,35 +793,24 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
       subject = "Обсуждение сотрудничества";
     }
 
-    const existing = orderId
-      ? await pool.query(
-          `SELECT id
-           FROM chats
-           WHERE ((company_a_id = $1 AND company_b_id = $2) OR (company_a_id = $2 AND company_b_id = $1))
-             AND order_id = $3
-           LIMIT 1`,
-          [req.user.companyId, otherCompanyId, orderId],
-        )
-      : await pool.query(
-          `SELECT id
-           FROM chats
-           WHERE ((company_a_id = $1 AND company_b_id = $2) OR (company_a_id = $2 AND company_b_id = $1))
-             AND order_id IS NULL
-           LIMIT 1`,
-          [req.user.companyId, otherCompanyId],
-        );
+    // Блокировка на пару компаний и заказ закрывает гонку двух одновременных «Написать».
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const lockKey = `${[req.user.companyId, otherCompanyId].sort().join(":")}:${orderId || ""}`;
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", [lockKey]);
 
-    const chatId = existing.rows[0]?.id || `chat-${crypto.randomUUID()}`;
+    const existing = await findChatByPair(client, req.user.companyId, otherCompanyId, orderId);
+    const chatId = existing?.id || `chat-${crypto.randomUUID()}`;
 
-    if (!existing.rows[0]) {
-      await pool.query(
+    if (!existing) {
+      await client.query(
         `INSERT INTO chats (id, company_a_id, company_b_id, order_id, subject)
          VALUES ($1, $2, $3, $4, $5)`,
         [chatId, req.user.companyId, otherCompanyId, orderId, subject],
       );
     }
 
-    await pool.query(
+    await client.query(
       `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
        VALUES ($1, $2, NOW())
        ON CONFLICT (chat_id, company_id)
@@ -800,9 +818,36 @@ app.post("/api/chats/open", authMiddleware, async (req, res) => {
       [chatId, req.user.companyId],
     );
 
+    await client.query("COMMIT");
     res.json({ ok: true, chatId });
   } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+    }
+
+    if (error?.code === "23505" && client && otherCompanyId) {
+      try {
+        const existing = await findChatByPair(client, req.user.companyId, otherCompanyId, orderId);
+        if (existing) {
+          await client.query(
+            `INSERT INTO chat_reads (chat_id, company_id, last_read_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (chat_id, company_id)
+             DO UPDATE SET last_read_at = EXCLUDED.last_read_at`,
+            [existing.id, req.user.companyId],
+          );
+          return res.json({ ok: true, chatId: existing.id });
+        }
+      } catch {
+      }
+    }
+
     serverError(res, "Не удалось открыть чат.", error);
+  } finally {
+    client?.release();
   }
 });
 app.get("/api/chats", authMiddleware, async (req, res) => {
@@ -871,23 +916,99 @@ app.get("/api/chats", authMiddleware, async (req, res) => {
               o.summary AS "orderSummary",
               o.terms AS "orderTerms",
               o.company_id AS "orderCompanyId",
-              (SELECT m.sender_company_id FROM chat_messages m WHERE m.chat_id = ch.id ORDER BY m.created_at DESC LIMIT 1) AS "lastSenderCompanyId",
-              COALESCE((SELECT to_char(m.created_at, 'DD.MM.YYYY HH24:MI') FROM chat_messages m WHERE m.chat_id = ch.id ORDER BY m.created_at DESC LIMIT 1), to_char(ch.created_at, 'DD.MM.YYYY HH24:MI')) AS "lastActivityAt",
-              COALESCE((SELECT json_agg(json_build_object('id', m.id, 'text', m.text, 'createdAt', to_char(m.created_at, 'DD.MM.YYYY HH24:MI'), 'senderCompanyId', m.sender_company_id, 'attachments', m.attachments, 'createdAtIso', to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), '[]'::json) AS messages
+              last_message.sender_company_id AS "lastSenderCompanyId",
+              COALESCE(to_char(last_message.created_at, 'DD.MM.YYYY HH24:MI'), to_char(ch.created_at, 'DD.MM.YYYY HH24:MI')) AS "lastActivityAt",
+              COALESCE(to_char(last_message.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), to_char(ch.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) AS "lastActivityAtIso",
+              CASE
+                WHEN NULLIF(last_message.text, '') IS NOT NULL THEN LEFT(last_message.text, 160)
+                WHEN last_message.attachments_count > 0 THEN 'Вложений: ' || last_message.attachments_count
+                ELSE NULL
+              END AS "lastMessagePreview"
        FROM chats ch
        JOIN companies ca ON ca.id = ch.company_a_id
        JOIN companies cb ON cb.id = ch.company_b_id
        LEFT JOIN orders o ON o.id = ch.order_id
        LEFT JOIN chat_reads cr ON cr.chat_id = ch.id AND cr.company_id = NULLIF($2, '')
+       LEFT JOIN LATERAL (
+         SELECT m.sender_company_id,
+                m.text,
+                m.attachments,
+                m.created_at,
+                CASE WHEN jsonb_typeof(m.attachments) = 'array' THEN jsonb_array_length(m.attachments) ELSE 0 END AS attachments_count
+         FROM chat_messages m
+         WHERE m.chat_id = ch.id
+         ORDER BY m.created_at DESC, m.id DESC
+         LIMIT 1
+       ) last_message ON TRUE
        WHERE $1 = 'admin' OR ch.company_a_id = $2 OR ch.company_b_id = $2
        ORDER BY CASE WHEN $2 = '' THEN FALSE ELSE EXISTS (SELECT 1 FROM chat_archives archive_state WHERE archive_state.chat_id = ch.id AND archive_state.company_id = $2) END ASC,
-                COALESCE((SELECT MAX(m.created_at) FROM chat_messages m WHERE m.chat_id = ch.id), ch.created_at) DESC,
+                COALESCE(last_message.created_at, ch.created_at) DESC,
                 ch.created_at DESC`,
       [req.user.role, req.user.companyId || ""],
     );
     res.json(result.rows);
   } catch (error) {
     serverError(res, "Не удалось получить чаты.", error);
+  }
+});
+
+app.get("/api/chats/:id/messages", authMiddleware, async (req, res) => {
+  try {
+    const chat = await getChatForUser(req.params.id, req.user);
+    if (!chat) return res.status(404).json({ message: "Чат не найден." });
+
+    const limit = readBoundedInt(req.query.limit, 50, 1, 100);
+    const beforeId = String(req.query.beforeId || "").trim().slice(0, 120);
+    const afterId = String(req.query.afterId || "").trim().slice(0, 120);
+
+    if (beforeId && afterId) {
+      return res.status(400).json({ message: "Укажите только одно направление загрузки сообщений." });
+    }
+
+    const cursorId = beforeId || afterId;
+    const params = [req.params.id];
+    let cursorCondition = "";
+
+    if (cursorId) {
+      params.push(cursorId);
+      cursorCondition = beforeId
+        ? `AND (m.created_at, m.id) < (
+             SELECT cursor.created_at, cursor.id
+             FROM chat_messages cursor
+             WHERE cursor.id = $2 AND cursor.chat_id = $1
+           )`
+        : `AND (m.created_at, m.id) > (
+             SELECT cursor.created_at, cursor.id
+             FROM chat_messages cursor
+             WHERE cursor.id = $2 AND cursor.chat_id = $1
+           )`;
+    }
+
+    params.push(limit + 1);
+    const limitParam = `$${params.length}`;
+    const orderDirection = afterId ? "ASC" : "DESC";
+
+    const result = await pool.query(
+      `SELECT m.id,
+              m.text,
+              to_char(m.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt",
+              to_char(m.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAtIso",
+              m.sender_company_id AS "senderCompanyId",
+              m.attachments
+       FROM chat_messages m
+       WHERE m.chat_id = $1 ${cursorCondition}
+       ORDER BY m.created_at ${orderDirection}, m.id ${orderDirection}
+       LIMIT ${limitParam}`,
+      params,
+    );
+
+    const hasMore = result.rows.length > limit;
+    const rows = hasMore ? result.rows.slice(0, limit) : result.rows;
+    const messages = afterId ? rows : rows.reverse();
+
+    res.json({ messages, hasMore });
+  } catch (error) {
+    serverError(res, "Не удалось получить сообщения чата.", error);
   }
 });
 
@@ -1107,9 +1228,11 @@ app.post("/api/chats/:id/messages", authMiddleware, async (req, res) => {
 });
 // Каталог компаний и social proof.
 app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
-  const client = await pool.connect();
+  let client;
 
   try {
+    client = await pool.connect();
+
     if (!req.user.companyId) {
       return res.status(403).json({ message: "Только компания может оставить отзыв." });
     }
@@ -1165,13 +1288,15 @@ app.post("/api/companies/:id/reviews", authMiddleware, async (req, res) => {
     await client.query("COMMIT");
     res.status(existingReview ? 200 : 201).json({ ok: true, review: nextReview, rating: nextRating, updated: Boolean(existingReview) });
   } catch (error) {
-    try {
-      await client.query("ROLLBACK");
-    } catch {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
     }
     serverError(res, "Не удалось сохранить отзыв.", error);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
@@ -1278,6 +1403,31 @@ async function ensureSecuritySchema() {
      )`,
   );
   await pool.query("CREATE INDEX IF NOT EXISTS audit_log_created_at_idx ON audit_log (created_at DESC)");
+
+  await pool.query("CREATE INDEX IF NOT EXISTS orders_company_id_idx ON orders (company_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS orders_sort_order_idx ON orders (sort_order, id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS chats_company_a_id_idx ON chats (company_a_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS chats_company_b_id_idx ON chats (company_b_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS chats_order_id_idx ON chats (order_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS chat_messages_chat_created_idx ON chat_messages (chat_id, created_at, id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS users_company_id_idx ON users (company_id)");
+
+  const duplicateChats = await pool.query(
+    `SELECT 1
+     FROM chats
+     GROUP BY LEAST(company_a_id, company_b_id), GREATEST(company_a_id, company_b_id), COALESCE(order_id, '')
+     HAVING COUNT(*) > 1
+     LIMIT 1`,
+  );
+
+  if (duplicateChats.rows[0]) {
+    console.warn("Найдены дубли чатов: уникальный индекс не создан. Новые дубли блокируются транзакцией /chats/open.");
+  } else {
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS chats_unique_pair_order_idx
+       ON chats (LEAST(company_a_id, company_b_id), GREATEST(company_a_id, company_b_id), COALESCE(order_id, ''))`,
+    );
+  }
 }
 
 async function cleanupExpiredSessions() {

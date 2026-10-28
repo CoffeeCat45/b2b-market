@@ -43,6 +43,8 @@ function CompanyPage() {
   const companyOrders = useMemo(() => orders.filter((item) => item.companyId === id), [orders, id]);
   const contactPath = `/chats?chatCompany=${encodeURIComponent(id)}`;
   const contactHref = user ? contactPath : `/login?next=${encodeURIComponent(contactPath)}`;
+  const isOwnCompany = Boolean(user?.companyId && user.companyId === id);
+  const canContact = Boolean(user?.companyId && !isOwnCompany);
   const canLeaveReview = Boolean(user?.companyId) && user.companyId !== id;
   const reviews = Array.isArray(company?.reviews) ? company.reviews : [];
   const specializations = Array.isArray(company?.specializations) ? company.specializations : [];
@@ -131,9 +133,15 @@ function CompanyPage() {
               <p>{company.description}</p>
             </div>
             <div className="company-hero-actions">
-              <Link to={contactHref} className="button button-primary button-block">
-                Написать
-              </Link>
+              {canContact || !user ? (
+                <Link to={contactHref} className="button button-primary button-block">
+                  Написать
+                </Link>
+              ) : (
+                <span className="muted">
+                  {isOwnCompany ? "Это профиль вашей компании." : "Чат доступен только аккаунтам компаний."}
+                </span>
+              )}
             </div>
           </article>
           <Tabs

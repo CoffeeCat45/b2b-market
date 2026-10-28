@@ -183,3 +183,11 @@ ALTER TABLE chats
 UPDATE chats
 SET lifecycle_status = 'negotiation'
 WHERE lifecycle_status = 'active';
+
+CREATE INDEX IF NOT EXISTS orders_company_id_idx ON orders (company_id);
+CREATE INDEX IF NOT EXISTS orders_sort_order_idx ON orders (sort_order, id);
+CREATE INDEX IF NOT EXISTS chats_company_a_id_idx ON chats (company_a_id);
+CREATE INDEX IF NOT EXISTS chats_company_b_id_idx ON chats (company_b_id);
+CREATE INDEX IF NOT EXISTS chats_order_id_idx ON chats (order_id);
+CREATE INDEX IF NOT EXISTS chat_messages_chat_created_idx ON chat_messages (chat_id, created_at, id);
+CREATE INDEX IF NOT EXISTS users_company_id_idx ON users (company_id);

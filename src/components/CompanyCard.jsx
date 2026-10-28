@@ -18,6 +18,8 @@ function CompanyCard({ supplier, onTagClick }) {
 
   const contactPath = `/chats?chatCompany=${encodeURIComponent(supplier.companyId)}`;
   const contactHref = user ? contactPath : `/login?next=${encodeURIComponent(contactPath)}`;
+  const isOwnCompany = Boolean(user?.companyId && user.companyId === supplier.companyId);
+  const canContact = Boolean(user?.companyId && !isOwnCompany);
 
   return (
     <article className="card company-card card-clickable" role="link" tabIndex={0} onClick={openCard} onKeyDown={handleKeyDown}>
@@ -50,7 +52,11 @@ function CompanyCard({ supplier, onTagClick }) {
           ))}
         </div>
         <div className="card-actions">
-          <Link to={contactHref} className="button button-primary" onClick={(event) => event.stopPropagation()}>Связаться</Link>
+          {canContact || !user ? (
+            <Link to={contactHref} className="button button-primary" onClick={(event) => event.stopPropagation()}>Связаться</Link>
+          ) : (
+            <span className="muted">{isOwnCompany ? "Это ваша компания" : "Чат только для компаний"}</span>
+          )}
         </div>
       </div>
     </article>

@@ -190,6 +190,9 @@ function LoginPage() {
                   required
                   maxLength={LIMITS.profile.displayNameMax}
                   autoComplete="name"
+                  autoCapitalize="words"
+                  spellCheck={false}
+                  lang="ru"
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
                   placeholder="Анна Петрова"
