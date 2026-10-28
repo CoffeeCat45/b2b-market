@@ -2599,6 +2599,13 @@ main {
   opacity: 0.82;
 }
 
+.footer-version {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
 .breadcrumbs {
   margin-bottom: 18px;
   row-gap: 8px;

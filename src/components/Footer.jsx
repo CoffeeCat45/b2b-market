@@ -12,6 +12,7 @@ function Footer() {
           <Link to="/orders">Каталог заказов</Link>
           <Link to="/suppliers">Каталог поставщиков</Link>
           <Link to="/create">Разместить объявление</Link>
+          <span className="footer-version">Версия {__APP_VERSION__}</span>
         </div>
       </div>
     </footer>
