@@ -8,6 +8,13 @@ import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
+import {
+  getCompanyAbout,
+  getCompanyDescription,
+  hasCompanyAbout,
+  hasCompanyDescription,
+  isCompanyProfileIncomplete,
+} from "../lib/companyText";
 import { LIMITS } from "../../shared/validation.js";
 
 function formatReviewDate(value) {
@@ -130,7 +137,10 @@ function CompanyPage() {
                 <span>★ {company.rating}</span>
                 <span>{specializations.join(" · ")}</span>
               </div>
-              <p>{company.description}</p>
+              <p className={hasCompanyDescription(company) ? undefined : "muted"}>{getCompanyDescription(company)}</p>
+              {isOwnCompany && isCompanyProfileIncomplete(company) ? (
+                <Link to="/create?profile=edit" className="inline-cta">Заполнить описание</Link>
+              ) : null}
             </div>
             <div className="company-hero-actions">
               {canContact || !user ? (
@@ -157,7 +167,10 @@ function CompanyPage() {
           {activeTab === "about" ? (
             <section className="tab-panel card">
               <h2>О компании</h2>
-              <p>{company.about}</p>
+              <p className={hasCompanyAbout(company) ? undefined : "muted"}>{getCompanyAbout(company)}</p>
+              {isOwnCompany && isCompanyProfileIncomplete(company) ? (
+                <Link to="/create?profile=edit" className="inline-cta">Заполнить описание</Link>
+              ) : null}
             </section>
           ) : null}
           {activeTab === "listings" ? (
@@ -278,11 +291,11 @@ function CompanyPage() {
                   </div>
                   <div className="company-data-wide">
                     <span>Описание компании</span>
-                    <strong>{company.description || "Не указано"}</strong>
+                    <strong>{getCompanyDescription(company)}</strong>
                   </div>
                   <div className="company-data-wide">
                     <span>О компании</span>
-                    <strong>{company.about || "Не указано"}</strong>
+                    <strong>{getCompanyAbout(company)}</strong>
                   </div>
                 </div>
               ) : (

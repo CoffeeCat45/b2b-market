@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import AsyncState from "../components/AsyncState";
+import { RequiredFieldsNote, RequiredMark } from "../components/RequiredFields";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
+import { isCompanyProfileIncomplete } from "../lib/companyText";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { LIMITS, validateOrderPayload } from "../../shared/validation.js";
 
@@ -34,6 +36,10 @@ function CreateOrderPage() {
     return found;
   }, [orders, editId, user]);
   const isEditing = Boolean(editId);
+  const ownCompany = useMemo(
+    () => (user?.companyId ? companies.find((company) => company.id === user.companyId) || null : null),
+    [companies, user],
+  );
   const categorySuggestions = useMemo(
     () => [...new Set(orders.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
     [orders],
@@ -194,12 +200,19 @@ function CreateOrderPage() {
             <div className="form-intro">
               <h2>{isEditing ? "Форма редактирования объявления" : "Форма создания объявления"}</h2>
               <p>{isEditing ? "Обновите данные текущего объявления и сохраните изменения." : "Заполните карточку, чтобы опубликовать новое объявление в каталоге."}</p>
+              <RequiredFieldsNote />
+              {ownCompany && isCompanyProfileIncomplete(ownCompany) ? (
+                <div className="profile-hint">
+                  <span>У компании не заполнены описание или раздел «О компании». Это не блокирует публикацию, но карточка будет выглядеть неполной.</span>
+                  <Link to="/create?profile=edit" className="inline-cta">Заполнить профиль</Link>
+                </div>
+              ) : null}
             </div>
             <div className="form-grid">
               {user.role === "admin" ? (
                 <label className="field field-type">
-                  <span>Компания</span>
-                  <select name="orderCompanyId" required value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}>
+                  <span>Компания<RequiredMark /></span>
+                  <select name="orderCompanyId" required aria-required="true" value={form.companyId} onChange={(event) => updateField("companyId", event.target.value)}>
                     <option value="">Выберите компанию</option>
                     {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
                   </select>
@@ -207,11 +220,12 @@ function CreateOrderPage() {
                 </label>
               ) : null}
               <label className="field">
-                <span>Категория</span>
+                <span>Категория<RequiredMark /></span>
                 <input
                   name="orderCategory"
                   list="order-category-options"
                   required
+                  aria-required="true"
                   minLength={LIMITS.order.categoryMin}
                   maxLength={LIMITS.order.categoryMax}
                   value={form.category}
@@ -223,10 +237,11 @@ function CreateOrderPage() {
                 <FieldError message={fieldErrors.category} />
               </label>
               <label className="field field-wide">
-                <span>Название</span>
+                <span>Название<RequiredMark /></span>
                 <input
                   name="orderTitle"
                   required
+                  aria-required="true"
                   minLength={LIMITS.order.titleMin}
                   maxLength={LIMITS.order.titleMax}
                   value={form.title}
@@ -235,10 +250,11 @@ function CreateOrderPage() {
                 <FieldError message={fieldErrors.title} />
               </label>
               <label className="field city-field">
-                <span>Город</span>
+                <span>Город<RequiredMark /></span>
                 <input
                   name="orderCityMajor"
                   required
+                  aria-required="true"
                   minLength={LIMITS.order.cityMin}
                   maxLength={LIMITS.order.cityMax}
                   value={form.cityMajor}
@@ -308,10 +324,11 @@ function CreateOrderPage() {
                 <FieldError message={fieldErrors.budgetTo} />
               </label>
               <label className="field field-wide">
-                <span>Краткое описание</span>
+                <span>Краткое описание<RequiredMark /></span>
                 <input
                   name="orderSummary"
                   required
+                  aria-required="true"
                   minLength={LIMITS.order.summaryMin}
                   maxLength={LIMITS.order.summaryMax}
                   value={form.summary}
@@ -320,11 +337,12 @@ function CreateOrderPage() {
                 <FieldError message={fieldErrors.summary} />
               </label>
               <label className="field field-wide">
-                <span>Полное описание</span>
+                <span>Полное описание<RequiredMark /></span>
                 <textarea
                   name="orderDescription"
                   rows="6"
                   required
+                  aria-required="true"
                   minLength={LIMITS.order.descriptionMin}
                   maxLength={LIMITS.order.descriptionMax}
                   value={form.description}
@@ -333,11 +351,12 @@ function CreateOrderPage() {
                 <FieldError message={fieldErrors.description} />
               </label>
               <label className="field field-wide">
-                <span>Условия сотрудничества</span>
+                <span>Условия сотрудничества<RequiredMark /></span>
                 <textarea
                   name="orderTerms"
                   rows="4"
                   required
+                  aria-required="true"
                   minLength={LIMITS.order.termsMin}
                   maxLength={LIMITS.order.termsMax}
                   value={form.terms}

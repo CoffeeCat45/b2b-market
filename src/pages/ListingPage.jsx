@@ -5,6 +5,11 @@ import AsyncState from "../components/AsyncState";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
+import {
+  getCompanyDescription,
+  hasCompanyDescription,
+  isCompanyProfileIncomplete,
+} from "../lib/companyText";
 
 function ListingPage() {
   const { id } = useParams();
@@ -143,7 +148,10 @@ function ListingPage() {
               {company ? (
                 <div className="card company-side-card">
                   <h3>{company.name}</h3>
-                  <p>{company.description}</p>
+                  <p className={hasCompanyDescription(company) ? undefined : "muted"}>{getCompanyDescription(company)}</p>
+                  {user?.companyId === company.id && isCompanyProfileIncomplete(company) ? (
+                    <Link to="/create?profile=edit" className="inline-cta">Заполнить описание</Link>
+                  ) : null}
                   <Link to={`/company/${company.id}`} className="button button-secondary button-block">
                     Профиль компании
                   </Link>

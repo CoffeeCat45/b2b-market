@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
+import { RequiredFieldsNote, RequiredMark } from "../components/RequiredFields";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { parseDateValue } from "../lib/date";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
+import { isCompanyProfileIncomplete } from "../lib/companyText";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { LIMITS, validatePassword, validateProfilePayload } from "../../shared/validation.js";
 
@@ -51,6 +53,7 @@ function CreatePage() {
   }
 
   const currentCompany = useMemo(() => companies.find((company) => company.id === user?.companyId) || null, [companies, user]);
+  const profileCompanyData = currentCompany || user;
 
   const editableOrders = useMemo(() => {
     if (!user) return [];
@@ -155,6 +158,16 @@ function CreatePage() {
     setProfilePassword("");
     setProfileError("");
   };
+
+  // Переход «Заполнить описание» ведёт сюда, но пароль всё равно подтверждается штатным шагом.
+  const profileEditHandledRef = useRef(false);
+
+  useEffect(() => {
+    if (searchParams.get("profile") !== "edit" || !user || profileEditHandledRef.current) return;
+    profileEditHandledRef.current = true;
+    openProfileModal();
+    startProfileEdit();
+  }, [searchParams, user]);
 
   const startPasswordChange = () => {
     setProfileStep("password");
@@ -431,6 +444,14 @@ function CreatePage() {
 
             {profileStep === "view" ? (
               <div className="modal-form-grid">
+                {isCompanyProfileIncomplete(profileCompanyData) ? (
+                  <div className="profile-incomplete-banner">
+                    <span>Профиль не заполнен: добавьте описание и раздел «О компании».</span>
+                    <button type="button" className="button button-secondary" onClick={startProfileEdit}>
+                      Заполнить
+                    </button>
+                  </div>
+                ) : null}
                 <div className="profile-data-grid">
                   <div className="profile-avatar-row profile-data-item profile-data-item-wide">
                     <span>Аватар компании</span>
@@ -502,7 +523,8 @@ function CreatePage() {
             ) : null}
 
             {profileStep === "edit" ? (
-              <form onSubmit={saveProfile} className="modal-form-grid">
+              <form onSubmit={saveProfile} className="modal-form-grid" noValidate>
+                <RequiredFieldsNote />
                 <div className="field field-wide avatar-editor-field">
                   <span>Аватар компании</span>
                   <div className="avatar-editor-panel">
@@ -523,14 +545,14 @@ function CreatePage() {
                     </div>
                   ) : null}
                 </div>
-                <label className="field"><span>Контактное имя</span><input name="profileDisplayName" required maxLength={LIMITS.profile.displayNameMax} autoComplete="name" autoCapitalize="words" spellCheck={false} lang="ru" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
-                <label className="field"><span>Email</span><input name="profileEmail" type="email" required maxLength={LIMITS.auth.emailMax} autoComplete="email" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
-                <label className="field"><span>Название компании</span><input name="profileCompanyName" required maxLength={LIMITS.profile.companyNameMax} autoComplete="organization" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
-                <label className="field"><span>Город</span><input name="profileCity" required maxLength={LIMITS.profile.cityMax} autoComplete="address-level2" value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
+                <label className="field"><span>Контактное имя<RequiredMark /></span><input name="profileDisplayName" required aria-required="true" maxLength={LIMITS.profile.displayNameMax} autoComplete="name" autoCapitalize="words" spellCheck={false} lang="ru" value={profileForm.displayName} onChange={(event) => updateProfileField("displayName", event.target.value)} /></label>
+                <label className="field"><span>Email<RequiredMark /></span><input name="profileEmail" type="email" required aria-required="true" maxLength={LIMITS.auth.emailMax} autoComplete="email" value={profileForm.email} onChange={(event) => updateProfileField("email", event.target.value)} /></label>
+                <label className="field"><span>Название компании<RequiredMark /></span><input name="profileCompanyName" required aria-required="true" maxLength={LIMITS.profile.companyNameMax} autoComplete="organization" value={profileForm.companyName} onChange={(event) => updateProfileField("companyName", event.target.value)} /></label>
+                <label className="field"><span>Город<RequiredMark /></span><input name="profileCity" required aria-required="true" maxLength={LIMITS.profile.cityMax} autoComplete="address-level2" value={profileForm.city} onChange={(event) => updateProfileField("city", event.target.value)} /></label>
                 <label className="field"><span>Телефон</span><input name="profilePhone" type="tel" maxLength={LIMITS.profile.phoneMax} autoComplete="tel" value={profileForm.phone} onChange={(event) => updateProfileField("phone", event.target.value)} placeholder="+7 (900) 000-00-00" /></label>
-                <label className="field"><span>Отрасль</span><input name="profileIndustry" required maxLength={LIMITS.profile.industryMax} value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
-                <label className="field field-wide"><span>Описание компании</span><textarea name="profileDescription" rows="4" required minLength={LIMITS.profile.descriptionMin} maxLength={LIMITS.profile.descriptionMax} value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
-                <label className="field field-wide"><span>О компании</span><textarea name="profileAbout" rows="5" required minLength={LIMITS.profile.aboutMin} maxLength={LIMITS.profile.aboutMax} value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
+                <label className="field"><span>Отрасль<RequiredMark /></span><input name="profileIndustry" required aria-required="true" maxLength={LIMITS.profile.industryMax} value={profileForm.industry} onChange={(event) => updateProfileField("industry", event.target.value)} placeholder="IT, строительство, производство" /></label>
+                <label className="field field-wide"><span>Описание компании<RequiredMark /></span><textarea name="profileDescription" rows="4" required aria-required="true" minLength={LIMITS.profile.descriptionMin} maxLength={LIMITS.profile.descriptionMax} value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
+                <label className="field field-wide"><span>О компании<RequiredMark /></span><textarea name="profileAbout" rows="5" required aria-required="true" minLength={LIMITS.profile.aboutMin} maxLength={LIMITS.profile.aboutMax} value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
                 <label className="field field-wide"><span>Теги</span><input name="profileSpecializations" maxLength={LIMITS.profile.specializationsMax * (LIMITS.profile.specializationMax + 2)} value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">

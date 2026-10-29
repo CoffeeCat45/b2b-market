@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
+import { RequiredFieldsNote, RequiredMark } from "../components/RequiredFields";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { LIMITS, validateRegisterPayload } from "../../shared/validation.js";
@@ -135,12 +136,14 @@ function LoginPage() {
 
           {mode === "login" ? (
             <form className="login-form" onSubmit={handleLogin} noValidate>
+              <RequiredFieldsNote />
               <label className="field">
-                <span>Email</span>
+                <span>Email<RequiredMark /></span>
                 <input
                   name="loginEmail"
                   type="email"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.auth.emailMax}
                   autoComplete="email"
                   value={email}
@@ -150,11 +153,12 @@ function LoginPage() {
                 {fieldErrors.email ? <span className="field-error">{fieldErrors.email}</span> : null}
               </label>
               <label className="field">
-                <span>Пароль</span>
+                <span>Пароль<RequiredMark /></span>
                 <input
                   name="loginPassword"
                   type="password"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.auth.passwordMaxBytes}
                   autoComplete="current-password"
                   value={password}
@@ -170,11 +174,13 @@ function LoginPage() {
             </form>
           ) : (
             <form className="login-form" onSubmit={handleRegister} noValidate>
+              <RequiredFieldsNote />
               <label className="field">
-                <span>Название компании</span>
+                <span>Название компании<RequiredMark /></span>
                 <input
                   name="registerCompanyName"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.profile.companyNameMax}
                   autoComplete="organization"
                   value={companyName}
@@ -184,10 +190,11 @@ function LoginPage() {
                 {fieldErrors.companyName ? <span className="field-error">{fieldErrors.companyName}</span> : null}
               </label>
               <label className="field">
-                <span>Контактное имя</span>
+                <span>Контактное имя<RequiredMark /></span>
                 <input
                   name="registerDisplayName"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.profile.displayNameMax}
                   autoComplete="name"
                   autoCapitalize="words"
@@ -200,10 +207,11 @@ function LoginPage() {
                 {fieldErrors.displayName ? <span className="field-error">{fieldErrors.displayName}</span> : null}
               </label>
               <label className="field">
-                <span>Город</span>
+                <span>Город<RequiredMark /></span>
                 <input
                   name="registerCity"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.profile.cityMax}
                   autoComplete="address-level2"
                   value={city}
@@ -213,11 +221,12 @@ function LoginPage() {
                 {fieldErrors.city ? <span className="field-error">{fieldErrors.city}</span> : null}
               </label>
               <label className="field">
-                <span>Сфера</span>
+                <span>Сфера<RequiredMark /></span>
                 <input
                   name="registerIndustry"
                   list="industry-options"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.profile.industryMax}
                   value={industry}
                   onChange={(event) => setIndustry(event.target.value)}
@@ -231,11 +240,12 @@ function LoginPage() {
                 {fieldErrors.industry ? <span className="field-error">{fieldErrors.industry}</span> : null}
               </label>
               <label className="field">
-                <span>Email</span>
+                <span>Email<RequiredMark /></span>
                 <input
                   name="registerEmail"
                   type="email"
                   required
+                  aria-required="true"
                   maxLength={LIMITS.auth.emailMax}
                   autoComplete="email"
                   value={email}
@@ -245,11 +255,12 @@ function LoginPage() {
                 {fieldErrors.email ? <span className="field-error">{fieldErrors.email}</span> : null}
               </label>
               <label className="field">
-                <span>Пароль</span>
+                <span>Пароль<RequiredMark /></span>
                 <input
                   name="registerPassword"
                   type="password"
                   required
+                  aria-required="true"
                   minLength={LIMITS.auth.passwordMinBytes}
                   maxLength={LIMITS.auth.passwordMaxBytes}
                   autoComplete="new-password"
@@ -260,11 +271,12 @@ function LoginPage() {
                 {fieldErrors.password ? <span className="field-error">{fieldErrors.password}</span> : null}
               </label>
               <label className="field">
-                <span>Повторите пароль</span>
+                <span>Повторите пароль<RequiredMark /></span>
                 <input
                   name="registerConfirmPassword"
                   type="password"
                   required
+                  aria-required="true"
                   minLength={LIMITS.auth.passwordMinBytes}
                   maxLength={LIMITS.auth.passwordMaxBytes}
                   autoComplete="new-password"

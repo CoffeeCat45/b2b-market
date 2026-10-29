@@ -1,39 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api";
+import { useContext, useEffect } from "react";
+import { MarketplaceDataContext } from "../context/MarketplaceDataContext";
 
 export function useMarketplaceData() {
-  const [orders, setOrders] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-  const [companies, setCompanies] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const value = useContext(MarketplaceDataContext);
+  const reload = value?.reload;
 
-  // Заказы, поставщики и компании грузятся вместе, потому что большинство экранов каталога завязаны на все три сущности.
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const [ordersData, suppliersData, companiesData] = await Promise.all([
-        apiFetch("/orders", { skipAuth: true }),
-        apiFetch("/suppliers", { skipAuth: true }),
-        apiFetch("/companies"),
-      ]);
-
-      setOrders(ordersData);
-      setSuppliers(suppliersData);
-      setCompanies(companiesData);
-    } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Кэш живёт 60 секунд: при заходе на страницу проверяем свежесть и при необходимости обновляем.
   useEffect(() => {
-    load();
-  }, [load]);
+    if (reload) void reload({ force: false });
+  }, [reload]);
 
-  return { orders, suppliers, companies, loading, error, reload: load };
+  if (!value) {
+    throw new Error("useMarketplaceData должен использоваться внутри MarketplaceDataProvider.");
+  }
+
+  return value;
 }
-

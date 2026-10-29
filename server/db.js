@@ -2,6 +2,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pg from "pg";
+import { markDegraded } from "./dbState.js";
 
 const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
@@ -64,6 +65,37 @@ const poolConfig = connectionString
     };
 
 export const pool = new Pool(poolConfig);
+
+// Ошибка простаивающего клиента не должна ронять процесс: помечаем БД проблемной,
+// а фоновая инициализация при следующем запросе переподключится.
+pool.on("error", (error) => {
+  console.error("Ошибка соединения с БД в пуле.", error?.message || error);
+  markDegraded();
+});
+
+const TRANSIENT_DB_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "57P01",
+  "57P03",
+  "08001",
+  "08006",
+  "53300",
+]);
+
+const TRANSIENT_DB_MESSAGE_PATTERN =
+  /timeout exceeded when trying to connect|Connection terminated|connection timeout|Query read timeout|Client has encountered a connection error/i;
+
+export function isTransientDbError(error) {
+  if (!error) return false;
+  if (TRANSIENT_DB_CODES.has(error.code)) return true;
+  return TRANSIENT_DB_MESSAGE_PATTERN.test(String(error.message || ""));
+}
 
 export async function testConnection() {
   const client = await pool.connect();

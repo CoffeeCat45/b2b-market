@@ -4,7 +4,8 @@ import cors from "cors";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
-import { pool, testConnection } from "./db.js";
+import { isTransientDbError, pool, testConnection } from "./db.js";
+import { getSnapshot, isReady, markDegraded, markReady, markSchemaReady, markWaking } from "./dbState.js";
 import { formatDisplayDate } from "../shared/dates.js";
 import {
   validateArchivePayload,
@@ -89,9 +90,31 @@ function sendValidationError(res, result) {
   return res.status(400).json({ message: result.message, fields: result.fields });
 }
 
+const DB_WAKING_MESSAGE = "База данных просыпается. Это может занять до минуты.";
+
+function sendDbWaking(res) {
+  res.set("Retry-After", "3");
+  return res.status(503).json({
+    code: "DB_WAKING",
+    message: DB_WAKING_MESSAGE,
+    retryAfterMs: 3000,
+  });
+}
+
 function serverError(res, message, error) {
   console.error(message, error);
+  if (isTransientDbError(error)) {
+    markWaking();
+    ensureDatabaseReady();
+    return sendDbWaking(res);
+  }
   return res.status(500).json({ message });
+}
+
+function requireDatabase(_req, res, next) {
+  if (isReady()) return next();
+  ensureDatabaseReady();
+  return sendDbWaking(res);
 }
 
 async function writeAuditLog(req, action, { userId = null, companyId = null, details = {} } = {}, queryClient = pool) {
@@ -252,15 +275,20 @@ async function findChatByPair(executor, companyId, otherCompanyId, orderId) {
 }
 
 // Сервисные и auth-маршруты.
-app.get("/api/health", async (_req, res) => {
-  try {
-    const dbOk = await testConnection();
-    res.json({ ok: true, database: dbOk ? "connected" : "unavailable" });
-  } catch (error) {
-    console.error("Health check failed.", error);
-    res.status(500).json({ ok: false, database: "unavailable" });
-  }
+// Health всегда 200 и без запроса в БД: Render считает сервис живым, пока порт отвечает.
+app.get("/api/health", (_req, res) => {
+  const snapshot = getSnapshot();
+  res.json({
+    ok: true,
+    ready: snapshot.ready,
+    database: snapshot.ready ? "connected" : snapshot.phase === "degraded" ? "degraded" : "waking",
+    schemaReady: snapshot.schemaReady,
+    startedAt: snapshot.startedAt,
+    checkedAt: new Date().toISOString(),
+  });
 });
+
+app.use("/api", requireDatabase);
 
 app.get("/api/locations", async (_req, res) => {
   try {
@@ -336,8 +364,8 @@ app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
         "",
         industry,
         0,
-        `${companyName} зарегистрирована на платформе B2B Connect.`,
-        `${companyName} работает в категории "${industry}" и может публиковать объявления, искать поставщиков и вести переговоры в чатах.`,
+        "",
+        "",
         JSON.stringify([industry]),
         JSON.stringify([]),
       ],
@@ -370,8 +398,8 @@ app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
         companyCity: city,
         companyPhone: "",
         industry,
-        description: `${companyName} зарегистрирована на платформе B2B Connect.`,
-        about: `${companyName} работает в категории "${industry}" и может публиковать объявления, искать поставщиков и вести переговоры в чатах.`,
+        description: "",
+        about: "",
         specializations: [industry],
       },
     });
@@ -1435,20 +1463,51 @@ async function cleanupExpiredSessions() {
   return result.rowCount;
 }
 
-async function startServer() {
-  try {
-    await ensureSecuritySchema();
-    const removedSessions = await cleanupExpiredSessions();
-    if (removedSessions) console.log(`Удалено просроченных сессий: ${removedSessions}`);
-  } catch (error) {
-    console.error("Не удалось применить security-схему.", error);
-  }
+const DB_INIT_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000];
+let databaseInitPromise = null;
 
-  app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-startServer();
+async function initializeDatabase() {
+  if (databaseInitPromise) return databaseInitPromise;
+
+  databaseInitPromise = (async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        markWaking();
+        await testConnection();
+        await ensureSecuritySchema();
+        markSchemaReady(true);
+        const removedSessions = await cleanupExpiredSessions();
+        if (removedSessions) console.log(`Удалено просроченных сессий: ${removedSessions}`);
+        markReady();
+        console.log("База данных готова к работе.");
+        return true;
+      } catch (error) {
+        console.error("База данных недоступна, повторная попытка.", error?.message || error);
+        markDegraded();
+        const delay = DB_INIT_BACKOFF_MS[Math.min(attempt, DB_INIT_BACKOFF_MS.length - 1)];
+        await sleep(delay);
+      }
+    }
+  })().finally(() => {
+    databaseInitPromise = null;
+  });
+
+  return databaseInitPromise;
+}
+
+function ensureDatabaseReady() {
+  return initializeDatabase();
+}
+
+// Слушаем порт до готовности БД: health-проверка Render не должна перезапускать сервис во время cold start.
+app.listen(port, () => console.log(`API server started on http://localhost:${port}`));
+void ensureDatabaseReady();
 
 setInterval(() => {
+  if (!isReady()) return;
   cleanupExpiredSessions().catch((error) => console.error("Не удалось очистить просроченные сессии.", error));
 }, 6 * 60 * 60 * 1000).unref();

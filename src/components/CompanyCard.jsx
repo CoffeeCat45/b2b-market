@@ -1,10 +1,14 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
+import { getCompanyDescription, hasCompanyDescription } from "../lib/companyText";
 
 function CompanyCard({ supplier, onTagClick }) {
   const { user } = useAuth();
   const skills = Array.isArray(supplier.skills) ? supplier.skills : [];
+  // В /suppliers description компании лежит в summary.
+  const summaryCompany = { description: supplier.summary };
+  const hasDescription = hasCompanyDescription(summaryCompany);
   const openCard = () => {
     window.open(`#/company/${supplier.companyId}`, "_blank", "noopener,noreferrer");
   };
@@ -30,7 +34,7 @@ function CompanyCard({ supplier, onTagClick }) {
         <div className="card-topline"><span className="pill pill-light">{supplier.industry}</span><span className="rating">★ {supplier.rating}</span></div>
         <h3>{supplier.name}</h3>
         <p className="company-city">{supplier.city}</p>
-        <p>{supplier.summary}</p>
+        <p className={hasDescription ? undefined : "muted"}>{getCompanyDescription(summaryCompany)}</p>
         <div className="card-tags">
           {skills.map((skill) => (
             onTagClick ? (

@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
+import { CONNECTION_RESTORED_EVENT } from "../lib/connection";
 
 const AuthContext = createContext(null);
 const AUTH_USER_CACHE_KEY = "auth_user_cache";
@@ -24,6 +25,8 @@ function writeCachedUser(nextUser) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
+  const unresolvedSessionRef = useRef(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -40,34 +43,77 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener("auth:expired", handleExpired);
   }, [location.pathname, location.search, navigate]);
 
+  // Если сессию не удалось подтвердить при холодном старте, повторяем запрос после восстановления связи.
+  useEffect(() => {
+    const handleRestored = () => {
+      if (unresolvedSessionRef.current) {
+        setRestoreAttempt((attempt) => attempt + 1);
+      }
+    };
+
+    window.addEventListener(CONNECTION_RESTORED_EVENT, handleRestored);
+    return () => window.removeEventListener(CONNECTION_RESTORED_EVENT, handleRestored);
+  }, []);
+
   // Восстанавливаем активную сессию при старте приложения, чтобы protected-маршруты рендерились предсказуемо.
   useEffect(() => {
     const token = localStorage.getItem("auth_token");
 
     if (!token) {
+      unresolvedSessionRef.current = false;
       setLoading(false);
       return;
     }
 
     const cachedUser = readCachedUser();
+    let cancelled = false;
 
-    apiFetch("/auth/me", { retries: 2 })
+    setLoading(true);
+
+    apiFetch("/auth/me", { timeoutMs: 8000, retryOnDbWaking: false, retries: 1 })
       .then((data) => {
+        if (cancelled) return;
+        unresolvedSessionRef.current = false;
         setUser(data.user);
         writeCachedUser(data.user);
+        setLoading(false);
       })
       .catch((authError) => {
+        if (cancelled) return;
+
         if (authError?.status === 401 || authError?.status === 403) {
+          unresolvedSessionRef.current = false;
           localStorage.removeItem("auth_token");
           writeCachedUser(null);
           setUser(null);
+          setLoading(false);
           return;
         }
 
-        setUser(cachedUser);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+        if (cachedUser) {
+          unresolvedSessionRef.current = false;
+          setUser(cachedUser);
+          setLoading(false);
+          return;
+        }
+
+        const transientFailure = !authError?.status || authError.status >= 500;
+
+        if (!transientFailure) {
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        // Нет кэша и нет связи: не разлогиниваем, ждём connection:restored и пробуем снова.
+        unresolvedSessionRef.current = true;
+        setUser(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [restoreAttempt]);
 
   const login = async (email, password) => {
     const data = await apiFetch("/auth/login", {
