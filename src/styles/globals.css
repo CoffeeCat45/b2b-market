@@ -153,15 +153,6 @@ main {
   font-weight: 700;
 }
 
-.header-settings-button {
-  width: 42px;
-  height: 42px;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-}
-
 .main-nav a.active,
 .main-nav a:hover {
   color: var(--navy);
@@ -766,6 +757,8 @@ main {
 .catalog-toolbar,
 .footer-row {
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px 48px;
 }
 
 .catalog-toolbar {
@@ -1212,6 +1205,35 @@ main {
   border-top: 1px solid rgba(214, 223, 236, 0.92);
 }
 
+.footer-brand {
+  display: grid;
+  gap: 6px;
+  max-width: 520px;
+}
+
+.footer-brand strong {
+  color: var(--navy);
+  font-size: 1.05rem;
+}
+
+.footer-brand p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.footer-links {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 24px;
+  padding-top: 2px;
+}
+
+.footer-meta {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 @media (max-width: 1080px) {
   .hero-grid,
   .catalog-layout,
@@ -1378,6 +1400,11 @@ main {
   .range-grid {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .footer-links,
+  .footer-meta {
+    justify-content: flex-start;
   }
 
   .category-grid .category-card:nth-child(n + 7) {
@@ -2406,6 +2433,57 @@ main {
   line-height: 1.4;
 }
 
+.search-settings-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.search-settings-presence.is-ready .search-semantic-dot {
+  background: #2f9e68;
+}
+
+.search-settings-presence.is-loading .search-semantic-dot {
+  background: var(--blue);
+  animation: connection-pulse 1.6s ease-in-out infinite;
+}
+
+.search-settings-presence.is-error .search-semantic-dot {
+  background: #c47a16;
+}
+
+.search-settings-model-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-settings-download {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+}
+
+.search-settings-progress {
+  flex-basis: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbe6f5;
+}
+
+.search-settings-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+  transition: width 0.2s ease;
+}
+
 .search-settings-field.is-disabled {
   opacity: 0.7;
 }
@@ -2925,7 +3003,6 @@ main {
 }
 
 .footer-version {
-  flex-basis: 100%;
   color: var(--muted);
   font-size: 13px;
   text-align: right;

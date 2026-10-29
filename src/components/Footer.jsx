@@ -9,7 +9,7 @@ function Footer() {
     <>
       <footer className="site-footer">
         <div className="container footer-row">
-          <div>
+          <div className="footer-brand">
             <strong>B2B Connect</strong>
             <p>Платформа для поиска поставщиков, подрядчиков и бизнес-заказов.</p>
           </div>
@@ -25,8 +25,10 @@ function Footer() {
             >
               Настройки поиска
             </button>
-            <span className="footer-version">Версия {__APP_VERSION__}</span>
           </div>
+        </div>
+        <div className="container footer-meta">
+          <span className="footer-version">Версия {__APP_VERSION__}</span>
         </div>
       </footer>
       {searchSettingsOpen ? (

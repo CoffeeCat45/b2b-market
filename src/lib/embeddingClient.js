@@ -3,6 +3,8 @@ import { getEmbeddingModel } from "../../shared/embeddings";
 const QUERY_CACHE_LIMIT = 40;
 const EMBEDDING_TIMEOUT_MS = 10 * 60 * 1000;
 const IDLE_STATUS = Object.freeze({ stage: "idle", progress: 0, message: "" });
+// transformers.js хранит скачанные файлы в Cache Storage под этим именем.
+const TRANSFORMERS_CACHE_NAME = "transformers-cache";
 
 const queryCache = new Map();
 const statusByModel = new Map();
@@ -14,6 +16,31 @@ let nextRequestId = 1;
 
 export function getEmbeddingModelStatus(modelId) {
   return statusByModel.get(modelId) || IDLE_STATUS;
+}
+
+export async function getEmbeddingModelPresence(modelId) {
+  const model = getEmbeddingModel(modelId);
+  if (!model) return "unknown";
+
+  const current = getEmbeddingModelStatus(modelId);
+  if (current.stage === "ready") return "ready";
+  if (current.stage === "loading") return "downloading";
+  if (typeof caches === "undefined") return "unknown";
+
+  try {
+    if (!(await caches.has(TRANSFORMERS_CACHE_NAME))) return "absent";
+
+    const cache = await caches.open(TRANSFORMERS_CACHE_NAME);
+    const requests = await cache.keys();
+    const modelMarker = `/${model.huggingFaceId}/`;
+    const cached = requests.some(
+      (request) => request.url.includes(modelMarker) && request.url.endsWith(".onnx"),
+    );
+
+    return cached ? "cached" : "absent";
+  } catch {
+    return "unknown";
+  }
 }
 
 export function subscribeEmbeddingStatus(listener) {
@@ -138,6 +165,48 @@ function ensureWorker() {
   };
 
   return worker;
+}
+
+export function preloadEmbeddingModel(modelId) {
+  const model = getEmbeddingModel(modelId);
+  if (!model) return Promise.reject(new Error("Неизвестная модель эмбеддингов."));
+  if (getEmbeddingModelStatus(modelId).stage === "ready") return Promise.resolve();
+
+  let activeWorker;
+  try {
+    activeWorker = ensureWorker();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
+  return new Promise((resolve, reject) => {
+    let timeoutId;
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+    };
+
+    const unsubscribe = subscribeEmbeddingStatus((changedModelId, status) => {
+      if (changedModelId !== modelId) return;
+
+      if (status.stage === "ready") {
+        cleanup();
+        resolve();
+      } else if (status.stage === "error") {
+        cleanup();
+        reject(new Error(status.message || "Не удалось загрузить нейросетевую модель."));
+      }
+    });
+
+    timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Модель не успела загрузиться. Попробуйте ещё раз."));
+    }, EMBEDDING_TIMEOUT_MS);
+
+    setStatus(modelId, { stage: "loading", progress: 0, message: "Загружаем модель…" });
+    activeWorker.postMessage({ type: "load", modelId });
+  });
 }
 
 export function embedQuery(modelId, text) {

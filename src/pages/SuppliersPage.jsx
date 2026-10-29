@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { useSearchPreferences } from "../hooks/useSearchPreferences";
 import { useSemanticSearch } from "../hooks/useSemanticSearch";
+import { useEmbeddingModelPresence } from "../hooks/useEmbeddingModelPresence";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseRussianDate } from "../lib/date";
 import { searchSuppliers } from "../../shared/search.js";
 import { getSupplierCompatibility } from "../../shared/compatibility.js";
@@ -177,7 +178,8 @@ function SuppliersPage() {
     });
   }, [suppliers, category, dateFilter, selectedCities, ratingValidation]);
 
-  const semanticEnabled = searchPreferences.mode === "neural" && Boolean(query.trim());
+  const neuralMode = searchPreferences.mode === "neural";
+  const semanticEnabled = neuralMode && Boolean(query.trim());
   const semanticSearch = useSemanticSearch({
     enabled: semanticEnabled,
     modelId: searchPreferences.model,
@@ -185,6 +187,7 @@ function SuppliersPage() {
     items: baseFilteredSuppliers,
     query,
   });
+  const modelPresence = useEmbeddingModelPresence(searchPreferences.model, neuralMode);
 
   const filteredSuppliers = useMemo(() => {
     const lexicalResults = query.trim()
@@ -290,9 +293,12 @@ function SuppliersPage() {
               ) : (
                 <>
                   <SearchSemanticStatus
+                    enabled={neuralMode}
                     active={semanticEnabled}
                     status={semanticSearch.status}
                     modelStatus={semanticSearch.modelStatus}
+                    presence={modelPresence.state}
+                    presenceProgress={modelPresence.progress}
                     error={semanticSearch.error}
                   />
                   {filteredSuppliers.length ? (

@@ -98,6 +98,15 @@ async function getExtractor(modelId) {
   }
 }
 
+async function handleLoad({ modelId }) {
+  try {
+    await getExtractor(modelId);
+    post({ type: "ready", modelId });
+  } catch {
+    // Ошибка уже отправлена из getExtractor.
+  }
+}
+
 async function handleEmbed({ requestId, modelId, text }) {
   try {
     const model = getEmbeddingModel(modelId);
@@ -126,7 +135,14 @@ async function handleEmbed({ requestId, modelId, text }) {
 
 self.addEventListener("message", (event) => {
   const data = event.data;
-  if (!data || data.type !== "embed") return;
+  if (!data) return;
+
+  if (data.type === "load") {
+    queue = queue.then(() => handleLoad(data)).catch(() => {});
+    return;
+  }
+
+  if (data.type !== "embed") return;
 
   queue = queue.then(() => handleEmbed(data)).catch((error) => {
     post({

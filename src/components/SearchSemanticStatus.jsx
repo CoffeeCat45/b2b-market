@@ -32,10 +32,43 @@ function getStatusText(status, modelStatus) {
   return null;
 }
 
-function SearchSemanticStatus({ active, status, modelStatus, error }) {
-  if (!active) return null;
+function getPresenceText(presence, modelStatus, progress) {
+  if (modelStatus?.stage === "error" || presence === "error") {
+    return { tone: "error", text: "Нейропоиск включён: модель не загрузилась — попробуйте повторить запрос." };
+  }
 
-  const display = getStatusText(status, modelStatus);
+  if (modelStatus?.stage === "loading" || presence === "downloading") {
+    const value = Number.isFinite(progress) ? Math.min(100, Math.max(0, progress)) : 0;
+    return {
+      tone: "loading",
+      text: value > 0
+        ? `Нейропоиск включён: модель скачивается на это устройство — ${value}%.`
+        : "Нейропоиск включён: модель скачивается на это устройство…",
+      progress: value,
+    };
+  }
+
+  if (presence === "ready" || presence === "cached") {
+    return { tone: "ready", text: "Нейропоиск включён: модель уже на этом устройстве." };
+  }
+
+  if (presence === "absent") {
+    return { tone: "muted", text: "Нейропоиск включён: модель скачается при первом запросе." };
+  }
+
+  if (presence === "unknown") {
+    return { tone: "muted", text: "Нейропоиск включён." };
+  }
+
+  return null;
+}
+
+function SearchSemanticStatus({ enabled = false, active, status, modelStatus, presence = "unknown", presenceProgress = 0, error }) {
+  if (!enabled) return null;
+
+  const display = active
+    ? getStatusText(status, modelStatus)
+    : getPresenceText(presence, modelStatus, presenceProgress);
   if (!display) return null;
 
   return (
