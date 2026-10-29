@@ -24,14 +24,34 @@ function cspPlugin(apiBase) {
     },
     transformIndexHtml(html) {
       const apiOrigin = getApiOrigin(apiBase);
-      const connectSources = ["'self'", ...(apiOrigin ? [apiOrigin] : []), ...(isDev ? ["ws:"] : [])];
+      // Модель и WASM-движок скачиваются с Hugging Face и jsDelivr, а ONNX Runtime
+      // кэширует WASM-фабрику как blob. Отсюда script-src blob: и worker-src blob:.
+      const modelOrigins = [
+        "https://huggingface.co",
+        "https://*.huggingface.co",
+        "https://*.hf.co",
+        "https://cdn.jsdelivr.net",
+      ];
+      const connectSources = [
+        "'self'",
+        ...(apiOrigin ? [apiOrigin] : []),
+        ...(isDev ? ["ws:"] : []),
+        ...modelOrigins,
+      ];
+      const scriptSources = [
+        "'self'",
+        "blob:",
+        "'wasm-unsafe-eval'",
+        ...(isDev ? ["'unsafe-inline'"] : []),
+      ];
       const csp = [
         "default-src 'self'",
-        isDev ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'",
+        `script-src ${scriptSources.join(" ")}`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "font-src 'self' data:",
         `connect-src ${connectSources.join(" ")}`,
+        "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -49,6 +69,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), cspPlugin(apiBase)],
     base: "/b2b-market/",
+    worker: {
+      format: "es",
+    },
     define: {
       __APP_VERSION__: JSON.stringify(packageJson.appVersion || packageJson.version),
     },

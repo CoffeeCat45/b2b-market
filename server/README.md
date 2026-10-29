@@ -7,7 +7,8 @@
 4. Run SQL from `server/sql/schema.sql`.
 5. Run SQL from `server/sql/seed.sql`.
 6. Optionally run `server/sql/demo-legal-entities.sql` to add five approved demo profiles of real legal entities.
-7. Start backend with `npm.cmd run server`.
+7. Optionally enable semantic search: run `server/sql/embeddings.sql` and backfill vectors with `npm run embeddings:backfill`.
+8. Start backend with `npm.cmd run server`.
 
 API endpoints:
 
@@ -15,11 +16,22 @@ API endpoints:
 - `GET /api/orders`
 - `GET /api/companies`
 - `GET /api/suppliers`
+- `GET /api/embeddings?model=compact|powerful&entityType=order|company`
+- `PUT /api/embeddings/:entityType/:entityId` (owner or admin)
 - `GET /api/companies/:id/verification` (owner or admin)
 - `POST /api/companies/:id/verification/request` (owner)
 - `GET /api/admin/verifications?status=pending|all` (admin)
 - `POST /api/admin/companies/:id/verification` (admin)
 - `POST /api/dadata/party` (authenticated)
+
+## Semantic search
+
+- `server/sql/embeddings.sql` enables pgvector in the `extensions` schema and creates `public.content_embeddings` (RLS on, no policies; the server connects as the table owner and bypasses RLS).
+- Vectors are computed in the browser by a local Transformers.js worker. The server only stores and serves vectors; it never runs inference.
+- `npm run embeddings:backfill` embeds all orders and companies on the server using the same model files. Use `--model=compact|powerful|all` and `--dry-run`; the script skips rows whose `source_hash` is unchanged.
+- Without a backfill the catalogs fall back to lexical search and show a status hint. Vector writes are rate-limited (60 per 10 minutes per user) and only allowed to the company owner or an admin.
+- Model choice and search mode are stored per browser (`localStorage`), not per company.
+
 
 ## Verification and DaData
 

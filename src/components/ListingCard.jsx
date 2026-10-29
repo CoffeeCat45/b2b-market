@@ -3,7 +3,7 @@ import CompatibilityBadge from "./CompatibilityBadge";
 import VerificationBadge from "./VerificationBadge";
 import VerificationWarning from "./VerificationWarning";
 
-function ListingCard({ item, featured = false, onTagClick, compatibility = null }) {
+function ListingCard({ item, featured = false, onTagClick, compatibility = null, contractorsHref = "" }) {
   const tags = Array.isArray(item.tags) ? item.tags : [];
   const openCard = () => {
     window.open(`#/listing/${item.id}`, "_blank", "noopener,noreferrer");
@@ -61,15 +61,26 @@ function ListingCard({ item, featured = false, onTagClick, compatibility = null 
       </div>
       <div className="card-actions">
         <strong className="price">{item.budget}</strong>
-        <Link
-          to={`/listing/${item.id}`}
-          target="_blank"
-          rel="noreferrer"
-          className="button button-secondary"
-          onClick={(event) => event.stopPropagation()}
-        >
-          Подробнее
-        </Link>
+        <div className="card-actions-buttons">
+          {contractorsHref ? (
+            <Link
+              to={contractorsHref}
+              className="button button-secondary"
+              onClick={(event) => event.stopPropagation()}
+            >
+              Подрядчики
+            </Link>
+          ) : null}
+          <Link
+            to={`/listing/${item.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="button button-secondary"
+            onClick={(event) => event.stopPropagation()}
+          >
+            Подробнее
+          </Link>
+        </div>
       </div>
     </article>
   );

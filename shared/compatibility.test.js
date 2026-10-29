@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getOrderCompatibility } from "./compatibility.js";
+import { getOrderCompatibility, getSupplierCompatibility } from "./compatibility.js";
 
 const order = {
   id: "ord-1",
@@ -73,6 +73,58 @@ test("аноним и своя компания не получают совме
 test("пустой профиль компании не даёт совместимость", () => {
   assert.equal(
     getOrderCompatibility({ id: "cmp-own", industry: "", city: "", specializations: [] }, order),
+    null,
+  );
+});
+
+test("совместимость заказа с поставщиком считается по профилю поставщика", () => {
+  const result = getSupplierCompatibility(order, {
+    companyId: "cmp-supplier",
+    industry: "Упаковка",
+    city: "Москва",
+    skills: ["Гофрокороб", "Картон", "Упаковка"],
+  });
+
+  assert.equal(result.score, 100);
+  assert.deepEqual(result.reasons, [
+    "Совпадают услуги: Гофрокороб, Картон, Упаковка",
+    "Совпадает отрасль",
+    "Совпадает город",
+  ]);
+});
+
+test("услуги поставщика важнее совпадения города", () => {
+  const packagingSupplier = getSupplierCompatibility(order, {
+    companyId: "cmp-pack",
+    industry: "Производство",
+    city: "Казань",
+    skills: ["Упаковка"],
+  });
+  const cityOnlySupplier = getSupplierCompatibility(order, {
+    companyId: "cmp-city",
+    industry: "IT",
+    city: "Москва",
+    skills: ["Разработка"],
+  });
+
+  assert.equal(packagingSupplier.score, 35);
+  assert.equal(cityOnlySupplier.score, 10);
+  assert.deepEqual(packagingSupplier.reasons, ["Совпадают услуги: Упаковка"]);
+  assert.deepEqual(cityOnlySupplier.reasons, ["Совпадает город"]);
+});
+
+test("своя компания и пустой профиль поставщика не дают совместимость", () => {
+  assert.equal(
+    getSupplierCompatibility(order, {
+      companyId: "cmp-other",
+      industry: "Упаковка",
+      city: "Москва",
+      skills: ["Гофрокороб"],
+    }),
+    null,
+  );
+  assert.equal(
+    getSupplierCompatibility(order, { companyId: "cmp-supplier", industry: "", city: "", skills: [] }),
     null,
   );
 });

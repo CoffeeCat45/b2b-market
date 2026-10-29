@@ -238,6 +238,11 @@ function CreatePage() {
     loadVerification();
   };
 
+  const openMatchingOrders = () => {
+    closeProfileModal();
+    navigate("/orders?match=profile");
+  };
+
   const requestVerification = async () => {
     if (!user?.companyId) return;
 
@@ -783,6 +788,7 @@ function CreatePage() {
                 <div className="modal-actions modal-actions-stack">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>{"Закрыть"}</button>
                   <button type="button" className="button button-secondary" onClick={openVerificationStep}>{"Проверка компании"}</button>
+                  <button type="button" className="button button-secondary" onClick={openMatchingOrders}>{"Найти заказы"}</button>
                   <button type="button" className="button button-secondary" onClick={startPasswordChange}>{"Сменить пароль"}</button>
                   <button type="button" className="button button-danger" onClick={startCompanyDelete}>{"Удалить компанию"}</button>
                   <button type="button" className="button button-primary" onClick={startProfileEdit}>{"Изменить"}</button>

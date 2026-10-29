@@ -2,10 +2,11 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { getCompanyDescription, hasCompanyDescription } from "../lib/companyText";
+import CompatibilityBadge from "./CompatibilityBadge";
 import VerificationBadge from "./VerificationBadge";
 import VerificationWarning from "./VerificationWarning";
 
-function CompanyCard({ supplier, onTagClick }) {
+function CompanyCard({ supplier, onTagClick, compatibility = null, compatibilityLabel }) {
   const { user } = useAuth();
   const skills = Array.isArray(supplier.skills) ? supplier.skills : [];
   // В /suppliers description компании лежит в summary.
@@ -44,6 +45,7 @@ function CompanyCard({ supplier, onTagClick }) {
         <h3>{supplier.name}</h3>
         <p className="company-city">{supplier.city}</p>
         <p className={hasDescription ? undefined : "muted"}>{getCompanyDescription(summaryCompany)}</p>
+        <CompatibilityBadge compatibility={compatibility} label={compatibilityLabel} />
         <VerificationWarning status={supplier.verificationStatus} variant="compact" />
         <div className="card-tags">
           {skills.map((skill) => (

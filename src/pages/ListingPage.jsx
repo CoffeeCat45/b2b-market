@@ -123,7 +123,7 @@ function ListingPage() {
                   <span className="muted">{item.date}</span>
                 </div>
                 <h1>{item.title}</h1>
-                <CompatibilityBadge compatibility={compatibility} alwaysShow />
+                <CompatibilityBadge compatibility={compatibility} />
                 <div className="detail-meta">
                   <strong>{item.company}</strong>
                   <VerificationBadge status={item.verificationStatus} reviewedAt={item.verificationReviewedAt} />
@@ -155,14 +155,16 @@ function ListingPage() {
             <aside className="detail-side">
               <div className="card sticky-card">
                 <strong className="price">{item.budget}</strong>
-                {canContact || !user ? (
+                {isOwnOrder ? (
+                  <Link to={`/suppliers?order=${encodeURIComponent(item.id)}`} className="button button-primary button-block">
+                    Найти подрядчиков
+                  </Link>
+                ) : canContact || !user ? (
                   <Link to={chatHref} className="button button-primary button-block">
                     Написать
                   </Link>
                 ) : (
-                  <p className="muted">
-                    {isOwnOrder ? "Это ваше объявление." : "Чат доступен только аккаунтам компаний."}
-                  </p>
+                  <p className="muted">Чат доступен только аккаунтам компаний.</p>
                 )}
                 <div className="side-meta">
                   <span>Дата публикации</span>

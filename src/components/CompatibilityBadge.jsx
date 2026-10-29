@@ -1,23 +1,21 @@
-const MIN_VISIBLE_SCORE = 40;
+const LOW_SCORE = 40;
 
-function CompatibilityBadge({ compatibility, alwaysShow = false }) {
+function CompatibilityBadge({ compatibility, label = "Совпадение профиля" }) {
   if (!compatibility) return null;
 
   const score = Number(compatibility.score) || 0;
-  if (!alwaysShow && score < MIN_VISIBLE_SCORE) return null;
-
-  const label = `Совпадение профиля: ${score}%`;
+  const text = `${label}: ${score}%`;
   const reasons = Array.isArray(compatibility.reasons) ? compatibility.reasons : [];
   const description = reasons.length ? reasons.join(" · ") : "Отрасль, город и услуги не совпали";
-  const isLow = score < MIN_VISIBLE_SCORE;
+  const isLow = score < LOW_SCORE;
 
   return (
     <span
       className={`compatibility-badge${isLow ? " compatibility-badge-low" : ""}`}
       title={description}
-      aria-label={`${label}. ${description}`}
+      aria-label={`${text}. ${description}`}
     >
-      {label}
+      {text}
     </span>
   );
 }

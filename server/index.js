@@ -9,6 +9,14 @@ import { getSnapshot, isReady, markDegraded, markReady, markSchemaReady, markWak
 import { lookupPartyByInn } from "./dadata.js";
 import { formatDisplayDate } from "../shared/dates.js";
 import {
+  buildCompanyEmbeddingText,
+  buildOrderEmbeddingText,
+  getEmbeddingModel,
+  getEmbeddingSourceHash,
+  isEmbeddingEntityType,
+  validateEmbeddingVector,
+} from "../shared/embeddings.js";
+import {
   isIndividualInn,
   isValidInn,
   normalizeInn,
@@ -193,6 +201,13 @@ const dadataRateLimiter = createUserRateLimiter({
   action: "dadata.rate_limited",
 });
 
+const embeddingWriteRateLimiter = createUserRateLimiter({
+  windowMinutes: 10,
+  max: 60,
+  message: "Слишком много обновлений нейроиндекса. Попробуйте позже.",
+  action: "embeddings.rate_limited",
+});
+
 // Хелперы сессий и авторизации.
 function getSessionExpiresAt() {
   return new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -245,6 +260,54 @@ function optionalAuthMiddleware(req, _res, next) {
       req.user = null;
       next();
     });
+}
+
+function parseStoredEmbedding(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  return value.replace(/^\[|\]$/g, "").split(",").map(Number).filter(Number.isFinite);
+}
+
+function isMissingEmbeddingsTable(error) {
+  return error?.code === "42P01";
+}
+
+function sendEmbeddingsUnavailable(res) {
+  return res.status(503).json({
+    code: "EMBEDDINGS_UNAVAILABLE",
+    message: "Нейроиндекс ещё не настроен на сервере.",
+  });
+}
+
+async function cleanupOrderEmbeddings(entityId) {
+  try {
+    await pool.query("DELETE FROM content_embeddings WHERE entity_type = 'order' AND entity_id = $1", [entityId]);
+  } catch (error) {
+    if (!isMissingEmbeddingsTable(error)) {
+      console.error("Не удалось удалить векторы объявления.", error);
+    }
+  }
+}
+
+async function cleanupCompanyEmbeddings(client, companyId) {
+  try {
+    await client.query("SAVEPOINT embeddings_cleanup");
+    await client.query(
+      `DELETE FROM content_embeddings
+       WHERE (entity_type = 'company' AND entity_id = $1)
+          OR (entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE company_id = $1))`,
+      [companyId],
+    );
+    await client.query("RELEASE SAVEPOINT embeddings_cleanup");
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK TO SAVEPOINT embeddings_cleanup");
+    } catch {
+    }
+    if (!isMissingEmbeddingsTable(error)) {
+      console.error("Не удалось удалить векторы компании.", error);
+    }
+  }
 }
 
 // Хелперы паролей поддерживают как bcrypt-хеши, так и старые plain-text записи.
@@ -569,6 +632,7 @@ app.delete("/api/auth/company", authMiddleware, async (req, res) => {
     }
 
     await client.query("BEGIN");
+    await cleanupCompanyEmbeddings(client, req.user.companyId);
     await client.query("DELETE FROM users WHERE company_id = $1", [req.user.companyId]);
     await client.query("DELETE FROM companies WHERE id = $1", [req.user.companyId]);
     await client.query("COMMIT");
@@ -853,6 +917,7 @@ app.delete("/api/orders/:id", authMiddleware, async (req, res) => {
     if (!order) return res.status(404).json({ message: "Объявление не найдено." });
     if (!(req.user.role === "admin" || req.user.companyId === order.companyId)) return res.status(403).json({ message: "Недостаточно прав." });
     await pool.query("DELETE FROM orders WHERE id = $1", [req.params.id]);
+    await cleanupOrderEmbeddings(req.params.id);
     res.json({ ok: true });
   } catch (error) {
     serverError(res, "Не удалось удалить объявление.", error);
@@ -1529,6 +1594,113 @@ app.get("/api/suppliers", async (_req, res) => {
     })));
   } catch (error) {
     serverError(res, "Не удалось получить список поставщиков.", error);
+  }
+});
+
+// Векторы смыслового поиска. Чтение публичное: в векторах нет контактов и персональных данных.
+app.get("/api/embeddings", async (req, res) => {
+  try {
+    const modelId = String(req.query.model || "");
+    const model = getEmbeddingModel(modelId);
+    if (!model) return res.status(400).json({ message: "Неизвестная модель эмбеддингов." });
+
+    const entityType = req.query.entityType ? String(req.query.entityType) : "";
+    if (entityType && !isEmbeddingEntityType(entityType)) {
+      return res.status(400).json({ message: "Неизвестный тип сущности." });
+    }
+
+    const params = [modelId];
+    const entityFilter = entityType ? " AND entity_type = $2" : "";
+    if (entityType) params.push(entityType);
+
+    const result = await pool.query(
+      `SELECT entity_type AS "entityType", entity_id AS "entityId", embedding::text AS embedding
+       FROM content_embeddings
+       WHERE model = $1${entityFilter}
+       ORDER BY updated_at DESC
+       LIMIT 5000`,
+      params,
+    );
+
+    res.set("Cache-Control", "public, max-age=60");
+    res.json({
+      model: modelId,
+      dimensions: model.dimensions,
+      items: result.rows
+        .map((row) => ({
+          entityType: row.entityType,
+          entityId: row.entityId,
+          vector: parseStoredEmbedding(row.embedding),
+        }))
+        .filter((item) => isEmbeddingEntityType(item.entityType) && item.vector.length === model.dimensions),
+    });
+  } catch (error) {
+    if (isMissingEmbeddingsTable(error)) return sendEmbeddingsUnavailable(res);
+    serverError(res, "Не удалось получить нейроиндекс.", error);
+  }
+});
+
+app.put("/api/embeddings/:entityType/:entityId", authMiddleware, embeddingWriteRateLimiter, async (req, res) => {
+  try {
+    const { entityType, entityId } = req.params;
+    if (!isEmbeddingEntityType(entityType)) return res.status(400).json({ message: "Неизвестный тип сущности." });
+    if (!entityId || entityId.length > 200) return res.status(400).json({ message: "Некорректный идентификатор." });
+
+    const modelId = String(req.body?.model || "");
+    const model = getEmbeddingModel(modelId);
+    if (!model) return res.status(400).json({ message: "Неизвестная модель эмбеддингов." });
+
+    const vectorValidation = validateEmbeddingVector(req.body?.vector, modelId);
+    if (!vectorValidation.ok) return res.status(400).json({ message: vectorValidation.error });
+
+    let text = "";
+    if (entityType === "order") {
+      const result = await pool.query(
+        `SELECT company_id AS "companyId", title, category, city_major AS "cityMajor", location_detail AS "locationDetail",
+                city, summary, description, terms, tags
+         FROM orders WHERE id = $1`,
+        [entityId],
+      );
+      const order = result.rows[0];
+      if (!order) return res.status(404).json({ message: "Объявление не найдено." });
+      if (!(req.user.role === "admin" || req.user.companyId === order.companyId)) {
+        return res.status(403).json({ message: "Недостаточно прав." });
+      }
+      text = buildOrderEmbeddingText(order);
+    } else {
+      const result = await pool.query(
+        `SELECT id, name, city, industry, description, about, specializations
+         FROM companies WHERE id = $1`,
+        [entityId],
+      );
+      const company = result.rows[0];
+      if (!company) return res.status(404).json({ message: "Компания не найдена." });
+      if (!(req.user.role === "admin" || req.user.companyId === entityId)) {
+        return res.status(403).json({ message: "Недостаточно прав." });
+      }
+      text = buildCompanyEmbeddingText(company);
+    }
+
+    if (!text) return res.status(400).json({ message: "Недостаточно данных для вектора." });
+
+    const sourceHash = getEmbeddingSourceHash(modelId, text);
+    const vector = `[${vectorValidation.value.join(",")}]`;
+
+    await pool.query(
+      `INSERT INTO content_embeddings (entity_type, entity_id, model, dimensions, embedding, source_hash, updated_at)
+       VALUES ($1, $2, $3, $4, $5::extensions.vector, $6, NOW())
+       ON CONFLICT (entity_type, entity_id, model)
+       DO UPDATE SET dimensions = EXCLUDED.dimensions,
+                     embedding = EXCLUDED.embedding,
+                     source_hash = EXCLUDED.source_hash,
+                     updated_at = NOW()`,
+      [entityType, entityId, modelId, model.dimensions, vector, sourceHash],
+    );
+
+    res.json({ ok: true, sourceHash });
+  } catch (error) {
+    if (isMissingEmbeddingsTable(error)) return sendEmbeddingsUnavailable(res);
+    serverError(res, "Не удалось сохранить вектор.", error);
   }
 });
 

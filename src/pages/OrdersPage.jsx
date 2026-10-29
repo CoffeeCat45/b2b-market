@@ -4,11 +4,15 @@ import Layout from "../components/Layout";
 import FilterSidebar from "../components/FilterSidebar";
 import ListingCard from "../components/ListingCard";
 import AsyncState from "../components/AsyncState";
+import SearchSemanticStatus from "../components/SearchSemanticStatus";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
+import { useSearchPreferences } from "../hooks/useSearchPreferences";
+import { useSemanticSearch } from "../hooks/useSemanticSearch";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseDateValue } from "../lib/date";
 import { searchOrders } from "../../shared/search.js";
 import { getOrderCompatibility } from "../../shared/compatibility.js";
+import { getEmbeddingModel, rankHybridResults } from "../../shared/embeddings.js";
 
 const SORT_OPTIONS = [
   { value: "relevance", label: "По релевантности" },
@@ -22,6 +26,9 @@ function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get("q") ?? "";
   const urlCategory = searchParams.get("category") ?? "";
+  const urlMatch = searchParams.get("match") ?? "";
+  const urlSort = searchParams.get("sort") ?? "";
+  const wantsCompatibility = urlMatch === "profile" || urlSort === "compatibility";
   const [query, setQuery] = useState(urlQuery);
   const [category, setCategory] = useState(urlCategory);
   const [dateFilter, setDateFilter] = useState("all");
@@ -33,10 +40,11 @@ function OrdersPage() {
   const [locationHint, setLocationHint] = useState("");
   const [minBudget, setMinBudget] = useState("");
   const [maxBudget, setMaxBudget] = useState("");
-  const [sortBy, setSortBy] = useState(urlQuery.trim() ? "relevance" : "date_desc");
+  const [sortBy, setSortBy] = useState(wantsCompatibility ? "compatibility" : urlQuery.trim() ? "relevance" : "date_desc");
   const sortManualRef = useRef(false);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { orders, companies, loading, error, reload } = useMarketplaceData();
+  const searchPreferences = useSearchPreferences();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
   const userCompany = useMemo(() => {
@@ -60,6 +68,22 @@ function OrdersPage() {
     };
   }, [companies, user]);
 
+  const sortOptions = useMemo(
+    () => (userCompany ? [{ value: "compatibility", label: "По совместимости" }, ...SORT_OPTIONS] : SORT_OPTIONS),
+    [userCompany],
+  );
+
+  useEffect(() => {
+    if (wantsCompatibility && userCompany && !sortManualRef.current) {
+      setSortBy("compatibility");
+    }
+  }, [wantsCompatibility, userCompany]);
+
+  useEffect(() => {
+    if (authLoading || userCompany || sortBy !== "compatibility") return;
+    setSortBy(urlQuery.trim() ? "relevance" : "date_desc");
+  }, [authLoading, userCompany, sortBy, urlQuery]);
+
   const syncUrl = useCallback((nextQuery, nextCategory) => {
     const params = new URLSearchParams();
     if (nextQuery.trim()) params.set("q", nextQuery.trim());
@@ -82,7 +106,11 @@ function OrdersPage() {
   const handleQueryChange = (value) => {
     setQuery(value);
     if (!sortManualRef.current) {
-      setSortBy(value.trim() ? "relevance" : "date_desc");
+      if (wantsCompatibility && userCompany) {
+        setSortBy("compatibility");
+      } else {
+        setSortBy(value.trim() ? "relevance" : "date_desc");
+      }
     }
     syncUrl(value, category);
   };
@@ -154,13 +182,13 @@ function OrdersPage() {
     };
   }, [minBudget, maxBudget]);
 
-  const filteredOrders = useMemo(() => {
+  const baseFilteredOrders = useMemo(() => {
     const normalizedMin = budgetValidation.min;
     const normalizedMax = budgetValidation.max;
     const majorCityQuery = appliedMajorCity.trim().toLowerCase();
     const locationQuery = appliedLocation.trim().toLowerCase();
 
-    const matchedOrders = orders.filter((item) => {
+    return orders.filter((item) => {
       const matchesCategory = !category || item.category === category;
       const matchesDate = matchesDateFilter(item.publishedAt, dateFilter);
       const matchesMajorCity = !majorCityQuery || (item.cityMajor || "").toLowerCase() === majorCityQuery;
@@ -169,12 +197,43 @@ function OrdersPage() {
       const matchesMaxBudget = normalizedMax === null || item.budgetFrom <= normalizedMax;
       return matchesCategory && matchesDate && matchesMajorCity && matchesLocation && matchesMinBudget && matchesMaxBudget;
     });
+  }, [orders, category, dateFilter, appliedMajorCity, appliedLocation, budgetValidation]);
 
-    const results = query.trim()
-      ? searchOrders(matchedOrders, query)
-      : matchedOrders.map((item) => ({ item, score: 0 }));
+  const semanticEnabled = searchPreferences.mode === "neural" && Boolean(query.trim());
+  const semanticSearch = useSemanticSearch({
+    enabled: semanticEnabled,
+    modelId: searchPreferences.model,
+    entityType: "order",
+    items: baseFilteredOrders,
+    query,
+  });
+
+  const filteredOrders = useMemo(() => {
+    const lexicalResults = query.trim()
+      ? searchOrders(baseFilteredOrders, query)
+      : baseFilteredOrders.map((item) => ({ item, score: 0 }));
+
+    const results = semanticEnabled && semanticSearch.status === "ready" && semanticSearch.scores.size
+      ? rankHybridResults(baseFilteredOrders, {
+        lexicalScores: new Map(lexicalResults.map((entry) => [entry.item.id, entry.score])),
+        semanticScores: semanticSearch.scores,
+        semanticThreshold: getEmbeddingModel(searchPreferences.model)?.semanticThreshold ?? 0,
+      })
+      : lexicalResults;
+
+    const compatibilityScores = new Map();
+    if (sortBy === "compatibility" && userCompany) {
+      for (const entry of results) {
+        compatibilityScores.set(entry.item.id, getOrderCompatibility(userCompany, entry.item)?.score ?? -1);
+      }
+    }
 
     results.sort((a, b) => {
+      if (sortBy === "compatibility" && userCompany) {
+        const compatibilityDiff = (compatibilityScores.get(b.item.id) ?? -1) - (compatibilityScores.get(a.item.id) ?? -1);
+        if (compatibilityDiff !== 0) return compatibilityDiff;
+      }
+
       if (sortBy === "relevance") {
         const scoreDiff = (b.score || 0) - (a.score || 0);
         if (scoreDiff !== 0) return scoreDiff;
@@ -199,7 +258,7 @@ function OrdersPage() {
     });
 
     return results.map((entry) => entry.item);
-  }, [orders, query, category, dateFilter, appliedMajorCity, appliedLocation, budgetValidation, sortBy]);
+  }, [baseFilteredOrders, query, sortBy, userCompany, semanticEnabled, semanticSearch.status, semanticSearch.scores, searchPreferences.model]);
 
   const applyMajorCity = (value) => {
     const trimmed = value.trim();
@@ -309,40 +368,55 @@ function OrdersPage() {
             <div className="catalog-content">
               {loading || error ? (
                 <AsyncState loading={loading} error={error} onRetry={reload} loadingText="Загружаем объявления…" />
-              ) : filteredOrders.length ? (
-                <>
-                  <div className="catalog-toolbar card">
-                    <span>Сортировка</span>
-                    <label className="catalog-sort-control">
-                      <span className="visually-hidden">Сортировка заказов</span>
-                      <select name="ordersSort" value={sortBy} onChange={(event) => handleSortChange(event.target.value)}>
-                        {SORT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="catalog-list">
-                    {filteredOrders.map((item) => (
-                      <ListingCard
-                        key={item.id}
-                        item={item}
-                        onTagClick={handleQueryChange}
-                        compatibility={getOrderCompatibility(userCompany, item)}
-                      />
-                    ))}
-                  </div>
-                </>
               ) : (
-                <div className="empty-state card">
-                  <h2>Ничего не найдено</h2>
-                  <p>Попробуйте изменить запрос или сбросить фильтры.</p>
-                  <button type="button" className="button button-secondary" onClick={resetFilters}>
-                    Сбросить фильтры
-                  </button>
-                </div>
+                <>
+                  <SearchSemanticStatus
+                    active={semanticEnabled}
+                    status={semanticSearch.status}
+                    modelStatus={semanticSearch.modelStatus}
+                    error={semanticSearch.error}
+                  />
+                  {filteredOrders.length ? (
+                    <>
+                      <div className="catalog-toolbar card">
+                        <span>Сортировка</span>
+                        <label className="catalog-sort-control">
+                          <span className="visually-hidden">Сортировка заказов</span>
+                          <select name="ordersSort" value={sortBy} onChange={(event) => handleSortChange(event.target.value)}>
+                            {sortOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="catalog-list">
+                        {filteredOrders.map((item) => (
+                          <ListingCard
+                            key={item.id}
+                            item={item}
+                            onTagClick={handleQueryChange}
+                            compatibility={getOrderCompatibility(userCompany, item)}
+                            contractorsHref={
+                              user?.companyId && item.companyId === user.companyId
+                                ? `/suppliers?order=${encodeURIComponent(item.id)}`
+                                : ""
+                            }
+                          />
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-state card">
+                      <h2>Ничего не найдено</h2>
+                      <p>Попробуйте изменить запрос или сбросить фильтры.</p>
+                      <button type="button" className="button button-secondary" onClick={resetFilters}>
+                        Сбросить фильтры
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

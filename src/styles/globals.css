@@ -153,6 +153,15 @@ main {
   font-weight: 700;
 }
 
+.header-settings-button {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
 .main-nav a.active,
 .main-nav a:hover {
   color: var(--navy);
@@ -528,6 +537,13 @@ main {
   justify-content: space-between;
 }
 
+.card-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .price {
   font-size: 1.25rem;
   color: var(--navy-deep);
@@ -753,7 +769,70 @@ main {
 }
 
 .catalog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
   margin-bottom: 18px;
+}
+
+.catalog-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.catalog-toolbar-group .catalog-sort-control {
+  flex: 1 1 240px;
+}
+
+.search-semantic-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: -4px 0 4px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.search-semantic-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #8aa1bf;
+}
+
+.search-semantic-status.is-loading .search-semantic-dot {
+  background: var(--blue);
+  animation: connection-pulse 1.6s ease-in-out infinite;
+}
+
+.search-semantic-status.is-ready .search-semantic-dot {
+  background: #2f9e68;
+}
+
+.search-semantic-status.is-error .search-semantic-dot {
+  background: #c47a16;
+}
+
+.search-semantic-progress {
+  width: 120px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbe6f5;
+}
+
+.search-semantic-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+  transition: width 0.2s ease;
 }
 
 .catalog-list,
@@ -2282,6 +2361,60 @@ main {
   font-size: 1.2rem;
 }
 
+.search-settings-modal {
+  width: min(520px, 100%);
+}
+
+.search-settings-note {
+  padding: 12px 14px;
+  border: 1px solid #cfe0f7;
+  border-radius: 14px;
+  background: #f2f7ff;
+  color: var(--navy);
+  font-size: 0.9rem;
+}
+
+.search-settings-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.search-settings-field {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.search-settings-field > span {
+  font-size: 0.92rem;
+}
+
+.search-settings-field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 44px 14px 16px;
+  background: #fff;
+  color: var(--navy);
+  min-width: 0;
+}
+
+.search-settings-field small {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.search-settings-field.is-disabled {
+  opacity: 0.7;
+}
+
+.search-settings-field select:disabled {
+  background: #f3f6fb;
+  cursor: not-allowed;
+}
+
 .chat-panel-empty,
 .empty-chat-state {
   min-height: 180px;
@@ -2771,6 +2904,21 @@ main {
   transition: color 0.2s ease, opacity 0.2s ease;
 }
 
+.footer-settings-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.footer-settings-button:hover {
+  color: var(--navy);
+  opacity: 0.82;
+}
+
 .footer-links a:hover {
   color: var(--navy);
   opacity: 0.82;
@@ -2944,7 +3092,7 @@ main {
 }
 
 .verification-warning-compact {
-  margin-top: 10px;
+  margin: 10px 0 12px;
   padding: 8px 10px;
   font-size: 0.84rem;
   line-height: 1.35;
