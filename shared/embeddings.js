@@ -166,6 +166,18 @@ export function cosineSimilarity(left, right) {
   return Math.max(-1, Math.min(1, score));
 }
 
+// Порог модели считаем «пограничным совпадением» (50%), 1.0 — полным (100%).
+export function getSemanticMatchPercent(similarity, threshold = 0) {
+  if (!Number.isFinite(similarity)) return null;
+
+  const min = Number.isFinite(threshold) ? Math.min(Math.max(threshold, 0), 0.99) : 0;
+  if (similarity < min) return null;
+
+  const floor = min > 0 ? 50 : 0;
+  const ratio = (Math.min(similarity, 1) - min) / (1 - min);
+  return Math.round(floor + ratio * (100 - floor));
+}
+
 export function normalizeScoreMap(scores) {
   const normalized = new Map();
   let min = Infinity;

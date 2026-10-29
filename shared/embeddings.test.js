@@ -8,6 +8,7 @@ import {
   formatEmbeddingInput,
   getEmbeddingModel,
   getEmbeddingSourceHash,
+  getSemanticMatchPercent,
   isEmbeddingEntityType,
   normalizeScoreMap,
   rankHybridResults,
@@ -108,6 +109,19 @@ test("косинусная близость считает одинаковые 
   assert.equal(cosineSimilarity([1, 0], [-1, 0]), -1);
   assert.equal(cosineSimilarity([1, 0], [1]), 0);
   assert.equal(cosineSimilarity([], []), 0);
+});
+
+test("процент смыслового совпадения калибруется по порогу модели", () => {
+  assert.equal(getSemanticMatchPercent(0.5, 0.5), 50);
+  assert.equal(getSemanticMatchPercent(0.75, 0.5), 75);
+  assert.equal(getSemanticMatchPercent(1, 0.5), 100);
+  assert.equal(getSemanticMatchPercent(0.82, 0.82), 50);
+  assert.equal(getSemanticMatchPercent(0.91, 0.82), 75);
+  assert.equal(getSemanticMatchPercent(0.5, 0.82), null);
+  assert.equal(getSemanticMatchPercent(0, 0), 0);
+  assert.equal(getSemanticMatchPercent(0.5, 0), 50);
+  assert.equal(getSemanticMatchPercent(Number.NaN, 0.5), null);
+  assert.equal(getSemanticMatchPercent(1.2, 0.5), 100);
 });
 
 test("нормализация оценок приводит значения к диапазону 0..1", () => {

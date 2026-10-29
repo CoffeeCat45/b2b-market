@@ -13,7 +13,7 @@ import { useEmbeddingModelPresence } from "../hooks/useEmbeddingModelPresence";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseRussianDate } from "../lib/date";
 import { searchSuppliers } from "../../shared/search.js";
 import { getSupplierCompatibility } from "../../shared/compatibility.js";
-import { getEmbeddingModel, rankHybridResults } from "../../shared/embeddings.js";
+import { getEmbeddingModel, getSemanticMatchPercent, rankHybridResults } from "../../shared/embeddings.js";
 
 const SORT_OPTIONS = [
   { value: "relevance", label: "По релевантности" },
@@ -188,6 +188,18 @@ function SuppliersPage() {
     query,
   });
   const modelPresence = useEmbeddingModelPresence(searchPreferences.model, neuralMode);
+  const semanticThreshold = getEmbeddingModel(searchPreferences.model)?.semanticThreshold ?? 0;
+
+  const semanticMatchMap = useMemo(() => {
+    if (!semanticEnabled || semanticSearch.status !== "ready") return null;
+
+    const map = new Map();
+    for (const [id, score] of semanticSearch.scores) {
+      const percent = getSemanticMatchPercent(score, semanticThreshold);
+      if (percent !== null) map.set(id, percent);
+    }
+    return map;
+  }, [semanticEnabled, semanticSearch.status, semanticSearch.scores, semanticThreshold]);
 
   const filteredSuppliers = useMemo(() => {
     const lexicalResults = query.trim()
@@ -342,6 +354,7 @@ function SuppliersPage() {
                             onTagClick={handleQueryChange}
                             compatibility={compatibilityMap?.get(item.id) ?? null}
                             compatibilityLabel="Соответствие заказу"
+                            semanticMatch={semanticMatchMap?.get(item.id) ?? null}
                           />
                         ))}
                       </div>

@@ -1,9 +1,10 @@
 ﻿import { Link } from "react-router-dom";
 import CompatibilityBadge from "./CompatibilityBadge";
+import SemanticMatchBadge from "./SemanticMatchBadge";
 import VerificationBadge from "./VerificationBadge";
 import VerificationWarning from "./VerificationWarning";
 
-function ListingCard({ item, featured = false, onTagClick, compatibility = null, contractorsHref = "" }) {
+function ListingCard({ item, featured = false, onTagClick, compatibility = null, semanticMatch = null, contractorsHref = "" }) {
   const tags = Array.isArray(item.tags) ? item.tags : [];
   const openCard = () => {
     window.open(`#/listing/${item.id}`, "_blank", "noopener,noreferrer");
@@ -34,7 +35,12 @@ function ListingCard({ item, featured = false, onTagClick, compatibility = null,
         <VerificationBadge status={item.verificationStatus} reviewedAt={item.verificationReviewedAt} />
         <span>{item.city}</span>
       </div>
-      <CompatibilityBadge compatibility={compatibility} />
+      {compatibility || Number.isFinite(semanticMatch) ? (
+        <div className="card-badges">
+          <CompatibilityBadge compatibility={compatibility} />
+          <SemanticMatchBadge percent={semanticMatch} />
+        </div>
+      ) : null}
       <p>{item.summary}</p>
       <VerificationWarning status={item.verificationStatus} variant="compact" />
       <div className="card-tags">

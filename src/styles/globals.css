@@ -376,6 +376,36 @@ main {
   margin-top: 2px;
 }
 
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.semantic-match-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #f2ecff;
+  border: 1px solid rgba(109, 40, 217, 0.18);
+  color: #6d28d9;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.semantic-match-badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+}
+
 .search-bar input,
 .search-bar select,
 .field input,
