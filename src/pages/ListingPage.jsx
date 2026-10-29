@@ -123,7 +123,7 @@ function ListingPage() {
                   <span className="muted">{item.date}</span>
                 </div>
                 <h1>{item.title}</h1>
-                <CompatibilityBadge compatibility={compatibility} />
+                <CompatibilityBadge compatibility={compatibility} alwaysShow />
                 <div className="detail-meta">
                   <strong>{item.company}</strong>
                   <VerificationBadge status={item.verificationStatus} reviewedAt={item.verificationReviewedAt} />

@@ -357,6 +357,12 @@ main {
   line-height: 1.2;
 }
 
+.compatibility-badge-low {
+  background: #f3f5f8;
+  border-color: rgba(18, 48, 91, 0.14);
+  color: #64748b;
+}
+
 .compatibility-badge::before {
   content: "";
   width: 7px;
