@@ -2,11 +2,20 @@ import crypto from "crypto";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { rateLimit } from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import { isTransientDbError, pool, testConnection } from "./db.js";
 import { getSnapshot, isReady, markDegraded, markReady, markSchemaReady, markWaking } from "./dbState.js";
+import { lookupPartyByInn } from "./dadata.js";
 import { formatDisplayDate } from "../shared/dates.js";
+import {
+  isIndividualInn,
+  isValidInn,
+  normalizeInn,
+  validateCompanyLegalFields,
+  validateVerificationDecision,
+  validateVerificationPayload,
+} from "../shared/verification.js";
 import {
   validateArchivePayload,
   validateChatDetailsPayload,
@@ -156,6 +165,34 @@ const registerRateLimiter = createAuthRateLimiter({
   message: "Слишком много попыток регистрации. Попробуйте позже.",
 });
 
+function createUserRateLimiter({ windowMinutes, max, message, action }) {
+  return rateLimit({
+    windowMs: windowMinutes * 60 * 1000,
+    limit: max,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : ipKeyGenerator(req.ip)),
+    handler(req, res) {
+      void writeAuditLog(req, action, { userId: req.user?.id || null, companyId: req.user?.companyId || null });
+      res.status(429).json({ message });
+    },
+  });
+}
+
+const verificationRequestRateLimiter = createUserRateLimiter({
+  windowMinutes: 60,
+  max: 5,
+  message: "Слишком много заявок на проверку. Попробуйте позже.",
+  action: "verification.rate_limited",
+});
+
+const dadataRateLimiter = createUserRateLimiter({
+  windowMinutes: 1,
+  max: 10,
+  message: "Слишком много запросов к ЕГРЮЛ. Попробуйте позже.",
+  action: "dadata.rate_limited",
+});
+
 // Хелперы сессий и авторизации.
 function getSessionExpiresAt() {
   return new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -164,7 +201,7 @@ function getSessionExpiresAt() {
 async function getUserByToken(token, queryClient = pool) {
   if (!token) return null;
   const result = await queryClient.query(
-    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale"
+    `SELECT u.id, u.company_id AS "companyId", u.email, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale", c.verification_status AS "verificationStatus", c.inn, c.legal_name AS "legalName", c.ogrn, c.legal_address AS "legalAddress"
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN companies c ON c.id = u.company_id
@@ -183,6 +220,11 @@ async function authMiddleware(req, res, next) {
   } catch (error) {
     serverError(res, "Ошибка авторизации.", error);
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") return res.status(403).json({ message: "Недостаточно прав." });
+  next();
 }
 
 function optionalAuthMiddleware(req, _res, next) {
@@ -401,6 +443,11 @@ app.post("/api/auth/register", registerRateLimiter, async (req, res) => {
         description: "",
         about: "",
         specializations: [industry],
+        verificationStatus: "none",
+        inn: "",
+        legalName: "",
+        ogrn: "",
+        legalAddress: "",
       },
     });
   } catch (error) {
@@ -422,7 +469,7 @@ app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body || {};
     const result = await pool.query(
-      `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale"
+      `SELECT u.id, u.company_id AS "companyId", u.email, u.password, u.role, u.display_name AS "displayName", c.name AS company, c.city AS "companyCity", c.phone AS "companyPhone", c.industry, c.description, c.about, c.specializations, c.avatar_url AS "avatarUrl", c.avatar_position_x AS "avatarPositionX", c.avatar_position_y AS "avatarPositionY", c.avatar_scale AS "avatarScale", c.verification_status AS "verificationStatus", c.inn, c.legal_name AS "legalName", c.ogrn, c.legal_address AS "legalAddress"
        FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.email = $1`,
       [String(email || "").trim().toLowerCase()],
     );
@@ -541,6 +588,8 @@ app.delete("/api/auth/company", authMiddleware, async (req, res) => {
   }
 });
 
+const LEGAL_PROFILE_KEYS = ["inn", "legalName", "ogrn", "legalAddress"];
+
 async function updateProfileData(req, res, user, body, token, sharedClient = null) {
   let client = sharedClient;
   const shouldReleaseClient = !sharedClient;
@@ -557,6 +606,19 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
     if (!validation.ok) return sendValidationError(res, validation);
 
     const value = validation.value;
+
+    const legalProvided = Boolean(user.companyId)
+      && LEGAL_PROFILE_KEYS.some((key) => Object.prototype.hasOwnProperty.call(profileBody, key));
+    const legalValidation = legalProvided
+      ? validateCompanyLegalFields({
+        inn: profileBody.inn,
+        legalName: profileBody.legalName,
+        ogrn: profileBody.ogrn,
+        legalAddress: profileBody.legalAddress,
+      })
+      : null;
+
+    if (legalValidation && !legalValidation.ok) return sendValidationError(res, legalValidation);
 
     if (hasBrokenEncodingValue([value.displayName, value.companyName, value.city, value.industry, value.description, value.about, value.specializations])) {
       return res.status(400).json({ message: "Данные выглядят как сломанная кодировка. Обновите страницу и введите текст заново." });
@@ -585,6 +647,43 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
     await client.query("UPDATE users SET display_name = $2, email = $3 WHERE id = $1", [user.id, value.displayName, value.email]);
 
     if (user.companyId) {
+      const companyResult = await client.query(
+        `SELECT inn, legal_name AS "legalName", ogrn, legal_address AS "legalAddress", verification_status AS "verificationStatus"
+         FROM companies
+         WHERE id = $1
+         FOR UPDATE`,
+        [user.companyId],
+      );
+      const currentCompany = companyResult.rows[0];
+
+      if (!currentCompany) {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(404).json({ message: "Компания не найдена." });
+      }
+
+      const nextLegal = legalValidation?.value ?? {
+        inn: currentCompany.inn || "",
+        legalName: currentCompany.legalName || "",
+        ogrn: currentCompany.ogrn || "",
+        legalAddress: currentCompany.legalAddress || "",
+      };
+
+      const legalChanged = nextLegal.inn !== (currentCompany.inn || "")
+        || nextLegal.legalName !== (currentCompany.legalName || "")
+        || nextLegal.ogrn !== (currentCompany.ogrn || "")
+        || nextLegal.legalAddress !== (currentCompany.legalAddress || "");
+      const resetVerification = legalChanged && ["approved", "pending"].includes(currentCompany.verificationStatus);
+
+      if (nextLegal.inn) {
+        const duplicateInn = await client.query("SELECT id FROM companies WHERE inn = $1 AND id <> $2", [nextLegal.inn, user.companyId]);
+        if (duplicateInn.rows[0]) {
+          await client.query("ROLLBACK");
+          inTransaction = false;
+          return res.status(409).json({ message: "Этот ИНН уже привязан к другой компании.", fields: { inn: "Этот ИНН уже привязан к другой компании." } });
+        }
+      }
+
       await client.query(
         `UPDATE companies
          SET name = $2,
@@ -597,7 +696,16 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
              avatar_url = CASE WHEN $9 THEN $10 ELSE avatar_url END,
              avatar_position_x = $11,
              avatar_position_y = $12,
-             avatar_scale = $13
+             avatar_scale = $13,
+             inn = $14,
+             legal_name = $15,
+             ogrn = $16,
+             legal_address = $17,
+             verification_status = CASE WHEN $18 THEN 'none' ELSE verification_status END,
+             verification_reason = CASE WHEN $18 THEN '' ELSE verification_reason END,
+             verification_requested_at = CASE WHEN $18 THEN NULL ELSE verification_requested_at END,
+             verification_reviewed_at = CASE WHEN $18 THEN NULL ELSE verification_reviewed_at END,
+             verification_reviewed_by = CASE WHEN $18 THEN NULL ELSE verification_reviewed_by END
          WHERE id = $1`,
         [
           user.companyId,
@@ -613,6 +721,11 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
           value.avatarPositionX,
           value.avatarPositionY,
           value.avatarScale,
+          nextLegal.inn,
+          nextLegal.legalName,
+          nextLegal.ogrn,
+          nextLegal.legalAddress,
+          resetVerification,
         ],
       );
     }
@@ -631,6 +744,9 @@ async function updateProfileData(req, res, user, body, token, sharedClient = nul
       }
     }
     if (isUniqueViolation(error)) {
+      if (error.constraint === "companies_inn_unique_idx") {
+        return res.status(409).json({ message: "Этот ИНН уже привязан к другой компании.", fields: { inn: "Этот ИНН уже привязан к другой компании." } });
+      }
       return res.status(409).json({ message: "Пользователь с таким email уже существует.", fields: { email: "Этот email уже занят." } });
     }
     serverError(res, "Не удалось обновить данные профиля.", error);
@@ -663,12 +779,12 @@ app.get("/api/orders", async (_req, res) => {
       `SELECT o.id, o.title, o.category, o.city_major AS "cityMajor", o.location_detail AS "locationDetail", o.city,
               o.budget_from AS "budgetFrom", o.budget_to AS "budgetTo", o.budget_label AS budget,
               o.summary, o.description, o.terms, o.tags, o.published_at AS "publishedAt",
-              c.id AS "companyId", c.name AS company,
+              c.id AS "companyId", c.name AS company, c.verification_status AS "verificationStatus", c.verification_reviewed_at AS "verificationReviewedAt",
               COUNT(DISTINCT ov.user_id)::integer AS "viewsCount"
        FROM orders o
        JOIN companies c ON c.id = o.company_id
        LEFT JOIN order_views ov ON ov.order_id = o.id
-       GROUP BY o.id, c.id, c.name
+       GROUP BY o.id, c.id, c.name, c.verification_status, c.verification_reviewed_at
        ORDER BY o.sort_order ASC, o.id ASC`,
     );
     res.json(result.rows.map((row) => ({
@@ -1351,6 +1467,9 @@ app.get("/api/companies", optionalAuthMiddleware, async (req, res) => {
               c.about,
               c.specializations,
               c.reviews,
+              c.inn,
+              c.verification_status AS "verificationStatus",
+              c.verification_reviewed_at AS "verificationReviewedAt",
               to_char(c.created_at, 'DD.MM.YYYY') AS "createdAt",
               CASE WHEN $1 THEN cu.display_name ELSE NULL END AS "contactName",
               CASE WHEN $1 THEN cu.email ELSE NULL END AS "contactEmail"
@@ -1397,6 +1516,9 @@ app.get("/api/suppliers", async (_req, res) => {
               c.avatar_position_x AS "avatarPositionX",
               c.avatar_position_y AS "avatarPositionY",
               c.avatar_scale AS "avatarScale",
+              c.inn,
+              c.verification_status AS "verificationStatus",
+              c.verification_reviewed_at AS "verificationReviewedAt",
               to_char(c.created_at, 'DD.MM.YYYY HH24:MI') AS "createdAt"
        FROM companies c
        ORDER BY c.created_at DESC, c.id ASC`,
@@ -1407,6 +1529,238 @@ app.get("/api/suppliers", async (_req, res) => {
     })));
   } catch (error) {
     serverError(res, "Не удалось получить список поставщиков.", error);
+  }
+});
+
+// Верификация компаний и проверка реквизитов через DaData.
+const COMPANY_VERIFICATION_SELECT = `
+  SELECT c.id AS "companyId",
+         c.name AS "companyName",
+         c.verification_status AS status,
+         c.verification_reason AS reason,
+         c.verification_requested_at AS "requestedAt",
+         c.verification_reviewed_at AS "reviewedAt",
+         c.verification_reviewed_by AS "reviewedBy",
+         c.inn,
+         c.legal_name AS "legalName",
+         c.ogrn,
+         c.legal_address AS "legalAddress"
+  FROM companies c
+  WHERE c.id = $1
+`;
+
+app.get("/api/companies/:id/verification", authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(COMPANY_VERIFICATION_SELECT, [req.params.id]);
+    const company = result.rows[0];
+    if (!company) return res.status(404).json({ message: "Компания не найдена." });
+    if (!(req.user.role === "admin" || req.user.companyId === company.companyId)) {
+      return res.status(403).json({ message: "Недостаточно прав." });
+    }
+
+    res.json({ verification: company });
+  } catch (error) {
+    serverError(res, "Не удалось получить данные проверки.", error);
+  }
+});
+
+app.post("/api/companies/:id/verification/request", authMiddleware, verificationRequestRateLimiter, async (req, res) => {
+  let client;
+  let inTransaction = false;
+
+  try {
+    if (!req.user.companyId || req.user.companyId !== req.params.id) {
+      return res.status(403).json({ message: "Заявку может отправить только владелец компании." });
+    }
+
+    client = await pool.connect();
+    await client.query("BEGIN");
+    inTransaction = true;
+    await client.query("SET LOCAL lock_timeout = '3000ms'");
+
+    const existing = await client.query(
+      `SELECT verification_status AS status, inn, legal_name AS "legalName", ogrn, legal_address AS "legalAddress"
+       FROM companies
+       WHERE id = $1
+       FOR UPDATE`,
+      [req.params.id],
+    );
+    const company = existing.rows[0];
+
+    if (!company) {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+      return res.status(404).json({ message: "Компания не найдена." });
+    }
+
+    if (company.status === "pending") {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+      return res.status(409).json({ message: "Заявка уже на проверке." });
+    }
+
+    const body = req.body || {};
+    const readField = (key) => (Object.prototype.hasOwnProperty.call(body, key) ? body[key] : company[key]);
+    const validation = validateVerificationPayload({
+      inn: readField("inn"),
+      legalName: readField("legalName"),
+      ogrn: readField("ogrn"),
+      legalAddress: readField("legalAddress"),
+    });
+
+    if (!validation.ok) {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+      return sendValidationError(res, validation);
+    }
+
+    const value = validation.value;
+    const duplicateInn = await client.query("SELECT id FROM companies WHERE inn = $1 AND id <> $2", [value.inn, req.params.id]);
+    if (duplicateInn.rows[0]) {
+      await client.query("ROLLBACK");
+      inTransaction = false;
+      return res.status(409).json({ message: "Этот ИНН уже привязан к другой компании.", fields: { inn: "Этот ИНН уже привязан к другой компании." } });
+    }
+
+    await client.query(
+      `UPDATE companies
+       SET inn = $2,
+           legal_name = $3,
+           ogrn = $4,
+           legal_address = $5,
+           verification_status = 'pending',
+           verification_reason = '',
+           verification_requested_at = NOW(),
+           verification_reviewed_at = NULL,
+           verification_reviewed_by = NULL
+       WHERE id = $1`,
+      [req.params.id, value.inn, value.legalName, value.ogrn, value.legalAddress],
+    );
+
+    await client.query("COMMIT");
+    inTransaction = false;
+    await writeAuditLog(req, "company.verification_requested", {
+      userId: req.user.id,
+      companyId: req.params.id,
+      details: { previousStatus: company.status },
+    });
+
+    const refreshed = await pool.query(COMPANY_VERIFICATION_SELECT, [req.params.id]);
+    res.json({ ok: true, verification: refreshed.rows[0] });
+  } catch (error) {
+    if (inTransaction && client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+    }
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: "Этот ИНН уже привязан к другой компании.", fields: { inn: "Этот ИНН уже привязан к другой компании." } });
+    }
+    serverError(res, "Не удалось отправить заявку на проверку.", error);
+  } finally {
+    client?.release();
+  }
+});
+
+app.get("/api/admin/verifications", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const status = req.query.status === "all" ? "all" : "pending";
+    const result = await pool.query(
+      `SELECT c.id AS "companyId",
+              c.name AS "companyName",
+              c.inn,
+              c.legal_name AS "legalName",
+              c.ogrn,
+              c.legal_address AS "legalAddress",
+              c.verification_status AS status,
+              c.verification_reason AS reason,
+              c.verification_requested_at AS "requestedAt",
+              c.verification_reviewed_at AS "reviewedAt",
+              c.verification_reviewed_by AS "reviewedBy",
+              COALESCE(cu.display_name, '') AS "contactName",
+              COALESCE(cu.email, '') AS "contactEmail"
+       FROM companies c
+       LEFT JOIN LATERAL (
+         SELECT u.display_name, u.email
+         FROM users u
+         WHERE u.company_id = c.id AND u.role = 'company'
+         ORDER BY u.id ASC
+         LIMIT 1
+       ) cu ON TRUE
+       WHERE ($1 = 'all' OR c.verification_status = 'pending')
+       ORDER BY c.verification_requested_at DESC NULLS LAST, c.id ASC`,
+      [status],
+    );
+
+    res.json({ items: result.rows });
+  } catch (error) {
+    serverError(res, "Не удалось получить заявки на проверку.", error);
+  }
+});
+
+app.post("/api/admin/companies/:id/verification", authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const validation = validateVerificationDecision(req.body || {});
+    if (!validation.ok) return sendValidationError(res, validation);
+
+    const { decision, reason } = validation.value;
+    const existing = await pool.query(
+      `SELECT verification_status AS status, inn FROM companies WHERE id = $1`,
+      [req.params.id],
+    );
+    const company = existing.rows[0];
+
+    if (!company) return res.status(404).json({ message: "Компания не найдена." });
+
+    if (decision === "approved" && !isValidInn(company.inn)) {
+      return res.status(400).json({
+        message: "Нельзя подтвердить компанию без корректного ИНН.",
+        fields: { inn: "У компании нет корректного ИНН." },
+      });
+    }
+
+    await pool.query(
+      `UPDATE companies
+       SET verification_status = $2,
+           verification_reason = $3,
+           verification_reviewed_at = NOW(),
+           verification_reviewed_by = $4
+       WHERE id = $1`,
+      [req.params.id, decision, decision === "rejected" ? reason : "", req.user.id],
+    );
+
+    await writeAuditLog(
+      req,
+      decision === "approved" ? "admin.verification_approved" : "admin.verification_rejected",
+      { userId: req.user.id, companyId: req.params.id },
+    );
+
+    res.json({ ok: true, status: decision });
+  } catch (error) {
+    serverError(res, "Не удалось сохранить решение по проверке.", error);
+  }
+});
+
+app.post("/api/dadata/party", authMiddleware, dadataRateLimiter, async (req, res) => {
+  try {
+    const inn = normalizeInn(req.body?.inn);
+
+    if (!/^(?:\d{10}|\d{12})$/.test(inn) || !isValidInn(inn)) {
+      return res.status(400).json({
+        message: "Укажите корректный ИНН: 10 цифр для юрлица или 12 для ИП.",
+        fields: { inn: "Укажите корректный ИНН." },
+      });
+    }
+
+    if (isIndividualInn(inn)) {
+      return res.json({ available: false, reason: "individual" });
+    }
+
+    const result = await lookupPartyByInn(inn);
+    res.json(result);
+  } catch (error) {
+    serverError(res, "Не удалось проверить ИНН.", error);
   }
 });
 
@@ -1458,6 +1812,49 @@ async function ensureSecuritySchema() {
   }
 }
 
+async function ensureVerificationSchema() {
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS inn TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS legal_name TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS ogrn TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS legal_address TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'none'");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS verification_reason TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS verification_requested_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS verification_reviewed_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE companies ADD COLUMN IF NOT EXISTS verification_reviewed_by TEXT");
+
+  await pool.query(
+    `DO $$
+     BEGIN
+       ALTER TABLE companies
+         ADD CONSTRAINT companies_verification_status_check
+         CHECK (verification_status IN ('none', 'pending', 'approved', 'rejected'));
+     EXCEPTION
+       WHEN duplicate_object THEN NULL;
+     END $$`,
+  );
+
+  const duplicateInn = await pool.query(
+    `SELECT 1 FROM companies WHERE inn <> '' GROUP BY inn HAVING COUNT(*) > 1 LIMIT 1`,
+  );
+
+  if (duplicateInn.rows[0]) {
+    console.warn("Найдены дубли ИНН: уникальный индекс не создан. Заявки и профиль всё равно проверяют уникальность ИНН.");
+  } else {
+    try {
+      await pool.query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS companies_inn_unique_idx ON companies (inn) WHERE inn <> ''",
+      );
+    } catch (error) {
+      console.warn("Не удалось создать уникальный индекс ИНН.", error?.message || error);
+    }
+  }
+
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS companies_verification_status_idx ON companies (verification_status, verification_requested_at DESC)",
+  );
+}
+
 async function cleanupExpiredSessions() {
   const result = await pool.query("DELETE FROM sessions WHERE expires_at IS NULL OR expires_at <= NOW()");
   return result.rowCount;
@@ -1479,6 +1876,7 @@ async function initializeDatabase() {
         markWaking();
         await testConnection();
         await ensureSecuritySchema();
+        await ensureVerificationSchema();
         markSchemaReady(true);
         const removedSessions = await cleanupExpiredSessions();
         if (removedSessions) console.log(`Удалено просроченных сессий: ${removedSessions}`);

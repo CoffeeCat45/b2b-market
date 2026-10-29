@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import AsyncState from "../components/AsyncState";
 import CompatibilityBadge from "../components/CompatibilityBadge";
+import VerificationBadge from "../components/VerificationBadge";
+import VerificationWarning from "../components/VerificationWarning";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
@@ -124,10 +126,12 @@ function ListingPage() {
                 <CompatibilityBadge compatibility={compatibility} />
                 <div className="detail-meta">
                   <strong>{item.company}</strong>
+                  <VerificationBadge status={item.verificationStatus} reviewedAt={item.verificationReviewedAt} />
                   <span>{item.city}</span>
                   <span>{item.budget}</span>
                   <span>{effectiveViewsCount} просмотров</span>
                 </div>
+                <VerificationWarning status={item.verificationStatus} variant="full" />
                 <div className="detail-block">
                   <h3>Описание</h3>
                   <p>{item.description}</p>
@@ -172,6 +176,7 @@ function ListingPage() {
               {company ? (
                 <div className="card company-side-card">
                   <h3>{company.name}</h3>
+                  <VerificationBadge status={company.verificationStatus} reviewedAt={company.verificationReviewedAt} />
                   <p className={hasCompanyDescription(company) ? undefined : "muted"}>{getCompanyDescription(company)}</p>
                   {user?.companyId === company.id && isCompanyProfileIncomplete(company) ? (
                     <Link to="/create?profile=edit" className="inline-cta">Заполнить описание</Link>

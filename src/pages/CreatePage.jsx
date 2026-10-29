@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { RequiredFieldsNote, RequiredMark } from "../components/RequiredFields";
+import VerificationBadge from "../components/VerificationBadge";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 import { parseDateValue } from "../lib/date";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { isCompanyProfileIncomplete } from "../lib/companyText";
+import { canLookupInn, formatVerificationDate, getInnHint, getVerificationStatusLabel } from "../lib/verification";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { LIMITS, validatePassword, validateProfilePayload } from "../../shared/validation.js";
+import { VERIFICATION_LIMITS, isIndividualInn, validateCompanyLegalFields } from "../../shared/verification.js";
 
 function CreatePage() {
   const { user, loading, updateUser } = useAuth();
@@ -37,12 +40,29 @@ function CreatePage() {
     avatarPositionX: 50,
     avatarPositionY: 50,
     avatarScale: 100,
+    inn: "",
+    legalName: "",
+    ogrn: "",
+    legalAddress: "",
   });
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", nextPassword: "", confirmPassword: "" });
   const [deletePassword, setDeletePassword] = useState("");
   const [initialAvatarUrl, setInitialAvatarUrl] = useState("");
+  const [verificationData, setVerificationData] = useState(null);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [verificationError, setVerificationError] = useState("");
+  const [verificationSubmitting, setVerificationSubmitting] = useState(false);
+  const [dadataLoading, setDadataLoading] = useState(false);
+  const [dadataNotice, setDadataNotice] = useState("");
+  const [dadataError, setDadataError] = useState("");
+  const [adminVerifications, setAdminVerifications] = useState([]);
+  const [adminVerificationsLoading, setAdminVerificationsLoading] = useState(false);
+  const [adminVerificationsError, setAdminVerificationsError] = useState("");
+  const [adminRejectingId, setAdminRejectingId] = useState("");
+  const [adminRejectReason, setAdminRejectReason] = useState("");
+  const [adminDecisionLoading, setAdminDecisionLoading] = useState("");
 
   // Старые chat query params перенаправляем в отдельный workspace чатов.
   const chatCompany = searchParams.get("chatCompany");
@@ -139,6 +159,10 @@ function CreatePage() {
       avatarPositionX: currentCompany?.avatarPositionX ?? user?.avatarPositionX ?? 50,
       avatarPositionY: currentCompany?.avatarPositionY ?? user?.avatarPositionY ?? 50,
       avatarScale: currentCompany?.avatarScale ?? user?.avatarScale ?? 100,
+      inn: currentCompany?.inn ?? user?.inn ?? "",
+      legalName: currentCompany?.legalName ?? user?.legalName ?? "",
+      ogrn: currentCompany?.ogrn ?? user?.ogrn ?? "",
+      legalAddress: currentCompany?.legalAddress ?? user?.legalAddress ?? "",
     });
   };
 
@@ -151,6 +175,12 @@ function CreatePage() {
     setPasswordForm({ currentPassword: "", nextPassword: "", confirmPassword: "" });
     setDeletePassword("");
     setInitialAvatarUrl("");
+    setVerificationData(null);
+    setVerificationError("");
+    setVerificationSubmitting(false);
+    setDadataLoading(false);
+    setDadataNotice("");
+    setDadataError("");
   };
 
   const startProfileEdit = () => {
@@ -179,6 +209,169 @@ function CreatePage() {
     setProfileStep("delete");
     setProfileError("");
     setDeletePassword("");
+  };
+
+  const loadVerification = async () => {
+    if (!user?.companyId) return;
+
+    setVerificationLoading(true);
+    setVerificationError("");
+
+    try {
+      const data = await apiFetch(`/companies/${user.companyId}/verification`, { retries: 1 });
+      setVerificationData(data.verification);
+    } catch (loadError) {
+      setVerificationError(loadError.message);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const openVerificationStep = () => {
+    setProfileStep("verification");
+    setProfileError("");
+    setVerificationData(null);
+    setVerificationError("");
+    setVerificationSubmitting(false);
+    setDadataNotice("");
+    setDadataError("");
+    loadVerification();
+  };
+
+  const requestVerification = async () => {
+    if (!user?.companyId) return;
+
+    if (verificationData?.status === "approved" && !window.confirm("Отправить компанию на повторную проверку? Бейдж будет снят до решения.")) {
+      return;
+    }
+
+    setVerificationSubmitting(true);
+    setVerificationError("");
+
+    try {
+      const data = await apiFetch(`/companies/${user.companyId}/verification/request`, {
+        method: "POST",
+        body: JSON.stringify({}),
+        retries: 0,
+        timeoutMs: 8000,
+      });
+      setVerificationData(data.verification);
+      updateUser((current) => (current ? {
+        ...current,
+        verificationStatus: data.verification.status,
+        inn: data.verification.inn,
+        legalName: data.verification.legalName,
+        ogrn: data.verification.ogrn,
+        legalAddress: data.verification.legalAddress,
+      } : current));
+      setStatus("Заявка на проверку отправлена.");
+      reload().catch(() => {});
+    } catch (requestError) {
+      setVerificationError(requestError.message);
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+
+  const checkDadata = async () => {
+    const inn = profileForm.inn.replace(/\s+/g, "");
+
+    if (!canLookupInn(inn)) {
+      setDadataError(isIndividualInn(inn)
+        ? "Для ИП автопроверка недоступна: заполните реквизиты вручную."
+        : "Введите корректный 10-значный ИНН юрлица.");
+      setDadataNotice("");
+      return;
+    }
+
+    setDadataLoading(true);
+    setDadataError("");
+    setDadataNotice("");
+
+    try {
+      const data = await apiFetch("/dadata/party", {
+        method: "POST",
+        body: JSON.stringify({ inn }),
+        retries: 0,
+        timeoutMs: 12000,
+      });
+
+      if (!data.available) {
+        const reasons = {
+          not_configured: "Автопроверка недоступна: сервис не настроен. Заполните реквизиты вручную.",
+          not_found: "ИНН не найден в ЕГРЮЛ. Проверьте номер или заполните реквизиты вручную.",
+          rate_limited: "Сервис ЕГРЮЛ временно ограничил запросы. Попробуйте позже или заполните вручную.",
+          timeout: "Сервис ЕГРЮЛ не ответил вовремя. Заполните реквизиты вручную.",
+          individual: "Для ИП автопроверка недоступна: заполните реквизиты вручную.",
+          error: "Сервис ЕГРЮЛ временно недоступен. Заполните реквизиты вручную.",
+        };
+        setDadataError(reasons[data.reason] || reasons.error);
+        return;
+      }
+
+      const party = data.party || {};
+      setProfileForm((current) => ({
+        ...current,
+        legalName: party.nameFull || party.nameShort || current.legalName,
+        ogrn: party.ogrn || current.ogrn,
+        legalAddress: party.legalAddress || current.legalAddress,
+      }));
+      setDadataNotice(`Реквизиты найдены: ${party.nameShort || party.nameFull || "организация"}. Проверьте данные перед сохранением.`);
+    } catch (lookupError) {
+      setDadataError(lookupError.message);
+    } finally {
+      setDadataLoading(false);
+    }
+  };
+
+  const loadAdminVerifications = async () => {
+    if (user?.role !== "admin") return;
+
+    setAdminVerificationsLoading(true);
+    setAdminVerificationsError("");
+
+    try {
+      const data = await apiFetch("/admin/verifications?status=pending", { retries: 1 });
+      setAdminVerifications(Array.isArray(data.items) ? data.items : []);
+    } catch (loadError) {
+      setAdminVerificationsError(loadError.message);
+    } finally {
+      setAdminVerificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === "admin") loadAdminVerifications();
+  }, [user?.role]);
+
+  const decideVerification = async (companyId, decision) => {
+    if (decision === "rejected" && adminRejectReason.trim().length < VERIFICATION_LIMITS.reasonMin) {
+      setAdminVerificationsError(`Укажите причину отклонения: минимум ${VERIFICATION_LIMITS.reasonMin} символа.`);
+      return;
+    }
+
+    setAdminDecisionLoading(companyId);
+    setAdminVerificationsError("");
+
+    try {
+      await apiFetch(`/admin/companies/${companyId}/verification`, {
+        method: "POST",
+        body: JSON.stringify({
+          decision,
+          reason: decision === "rejected" ? adminRejectReason.trim() : "",
+        }),
+        retries: 0,
+      });
+      setStatus(decision === "approved" ? "Компания подтверждена." : "Заявка отклонена.");
+      setAdminRejectingId("");
+      setAdminRejectReason("");
+      await loadAdminVerifications();
+      reload().catch(() => {});
+    } catch (decisionError) {
+      setAdminVerificationsError(decisionError.message);
+    } finally {
+      setAdminDecisionLoading("");
+    }
   };
 
   const updatePasswordField = (field, value) => setPasswordForm((current) => ({ ...current, [field]: value }));
@@ -212,6 +405,12 @@ function CreatePage() {
     setProfileError("");
 
     const avatarChanged = profileForm.avatarUrl !== initialAvatarUrl;
+    const legalFields = {
+      inn: profileForm.inn,
+      legalName: profileForm.legalName,
+      ogrn: profileForm.ogrn,
+      legalAddress: profileForm.legalAddress,
+    };
     const payload = {
       currentPassword: profilePassword,
       displayName: profileForm.displayName.trim(),
@@ -226,6 +425,10 @@ function CreatePage() {
       avatarPositionX: profileForm.avatarPositionX,
       avatarPositionY: profileForm.avatarPositionY,
       avatarScale: profileForm.avatarScale,
+      inn: legalFields.inn,
+      legalName: legalFields.legalName,
+      ogrn: legalFields.ogrn,
+      legalAddress: legalFields.legalAddress,
       ...(avatarChanged ? { avatarUrl: profileForm.avatarUrl } : {}),
     };
     const validation = validateProfilePayload(payload, { requireCompanyFields: Boolean(user.companyId) });
@@ -233,6 +436,20 @@ function CreatePage() {
     if (!validation.ok) {
       setProfileError(validation.message);
       return;
+    }
+
+    if (user.companyId) {
+      const legalValidation = validateCompanyLegalFields(legalFields);
+
+      if (!legalValidation.ok) {
+        setProfileError(legalValidation.message);
+        return;
+      }
+
+      payload.inn = legalValidation.value.inn;
+      payload.legalName = legalValidation.value.legalName;
+      payload.ogrn = legalValidation.value.ogrn;
+      payload.legalAddress = legalValidation.value.legalAddress;
     }
 
     setProfileLoading(true);
@@ -328,7 +545,9 @@ function CreatePage() {
         ? "Смена пароля"
         : profileStep === "delete"
           ? "Удаление компании"
-          : "Изменение данных";
+          : profileStep === "verification"
+            ? "Проверка компании"
+            : "Изменение данных";
   const profileModalSubtitle = profileStep === "view"
     ? "Здесь можно посмотреть текущие данные аккаунта."
     : profileStep === "verify"
@@ -337,7 +556,9 @@ function CreatePage() {
         ? "Введите текущий пароль и новый пароль."
         : profileStep === "delete"
           ? "Это действие удалит компанию, её объявления, чаты и сессии."
-          : "Измените контакты, описание, отрасль и теги компании.";
+          : profileStep === "verification"
+            ? "Отправьте реквизиты на проверку: после подтверждения в профиле появится бейдж."
+            : "Измените контакты, описание, отрасль, теги и реквизиты компании.";
 
   if (loading) return null;
   if (!user) {
@@ -428,6 +649,86 @@ function CreatePage() {
               ))}
             </div>
           </div>
+
+          {user.role === "admin" ? (
+            <div className="card manage-card admin-verifications">
+              <div className="manage-header">
+                <h2>Заявки на проверку</h2>
+                <button type="button" className="button button-secondary" onClick={loadAdminVerifications} disabled={adminVerificationsLoading}>
+                  {adminVerificationsLoading ? "Обновление..." : "Обновить"}
+                </button>
+              </div>
+              {adminVerificationsError ? <div className="error-banner">{adminVerificationsError}</div> : null}
+              {!adminVerificationsLoading && !adminVerifications.length && !adminVerificationsError ? (
+                <p className="muted admin-verifications-empty">Новых заявок нет.</p>
+              ) : null}
+              <div className="manage-list">
+                {adminVerifications.map((item) => (
+                  <article key={item.companyId} className="manage-item admin-verification-item">
+                    <div>
+                      <strong>{item.companyName}</strong>
+                      <p className="muted">ИНН: {item.inn || "не указан"} · ОГРН: {item.ogrn || "не указан"}</p>
+                      <p>{item.legalName || "Наименование не указано"}</p>
+                      <p className="muted">{item.legalAddress || "Адрес не указан"}</p>
+                      <p className="muted">
+                        {item.contactName || item.contactEmail ? `Контакт: ${item.contactName || item.contactEmail}${item.contactName && item.contactEmail ? ` · ${item.contactEmail}` : ""} · ` : ""}
+                        Заявка: {formatVerificationDate(item.requestedAt) || "дата не указана"}
+                      </p>
+                    </div>
+                    <div className="manage-actions">
+                      <Link to={`/company/${item.companyId}`} className="button button-secondary">Профиль</Link>
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={() => decideVerification(item.companyId, "approved")}
+                        disabled={adminDecisionLoading === item.companyId}
+                      >
+                        {adminDecisionLoading === item.companyId ? "Сохранение..." : "Одобрить"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => {
+                          setAdminRejectingId(item.companyId);
+                          setAdminRejectReason("");
+                        }}
+                        disabled={adminDecisionLoading === item.companyId}
+                      >
+                        Отклонить
+                      </button>
+                    </div>
+                    {adminRejectingId === item.companyId ? (
+                      <div className="admin-reject-box">
+                        <label className="field">
+                          <span>Причина отклонения (видна только владельцу компании)</span>
+                          <textarea
+                            name="adminVerificationReason"
+                            rows="2"
+                            minLength={VERIFICATION_LIMITS.reasonMin}
+                            maxLength={VERIFICATION_LIMITS.reasonMax}
+                            value={adminRejectReason}
+                            onChange={(event) => setAdminRejectReason(event.target.value)}
+                            placeholder="Например: реквизиты не совпадают с данными ЕГРЮЛ"
+                          />
+                        </label>
+                        <div className="modal-actions">
+                          <button type="button" className="button button-secondary" onClick={() => setAdminRejectingId("")}>Отмена</button>
+                          <button
+                            type="button"
+                            className="button button-danger"
+                            onClick={() => decideVerification(item.companyId, "rejected")}
+                            disabled={adminDecisionLoading === item.companyId}
+                          >
+                            Отклонить заявку
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -465,12 +766,23 @@ function CreatePage() {
                   <div className="profile-data-item"><span>Город</span><strong>{profileForm.city || "Не указано"}</strong></div>
                   <div className="profile-data-item"><span>Телефон</span><strong>{profileForm.phone || "Не указано"}</strong></div>
                   <div className="profile-data-item"><span>Отрасль</span><strong>{profileForm.industry || "Не указано"}</strong></div>
+                  <div className="profile-data-item">
+                    <span>ИНН</span>
+                    <strong>{profileForm.inn || "Не указан"}</strong>
+                  </div>
+                  <div className="profile-data-item">
+                    <span>Статус проверки</span>
+                    <strong className="verification-view-status">
+                      {getVerificationStatusLabel(profileCompanyData?.verificationStatus)}
+                    </strong>
+                  </div>
                   <div className="profile-data-item profile-data-item-wide"><span>Описание компании</span><strong>{profileForm.description || "Не указано"}</strong></div>
                   <div className="profile-data-item profile-data-item-wide"><span>О компании</span><strong>{profileForm.about || "Не указано"}</strong></div>
                   <div className="profile-data-item profile-data-item-wide"><span>Теги</span><strong>{profileForm.specializations || "Не указано"}</strong></div>
                 </div>
                 <div className="modal-actions modal-actions-stack">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>{"Закрыть"}</button>
+                  <button type="button" className="button button-secondary" onClick={openVerificationStep}>{"Проверка компании"}</button>
                   <button type="button" className="button button-secondary" onClick={startPasswordChange}>{"Сменить пароль"}</button>
                   <button type="button" className="button button-danger" onClick={startCompanyDelete}>{"Удалить компанию"}</button>
                   <button type="button" className="button button-primary" onClick={startProfileEdit}>{"Изменить"}</button>
@@ -491,6 +803,79 @@ function CreatePage() {
                   <button type="submit" className="button button-primary" disabled={profileLoading}>{profileLoading ? "Проверка..." : "Продолжить"}</button>
                 </div>
               </form>
+            ) : null}
+
+
+            {profileStep === "verification" ? (
+              <div className="modal-form-grid">
+                {verificationLoading ? <p className="form-helper">Загружаем статус проверки…</p> : null}
+                {verificationError ? <div className="error-banner">{verificationError}</div> : null}
+
+                {!verificationLoading && verificationData ? (
+                  <>
+                    <div className={`verification-status-panel verification-status-${verificationData.status}`}>
+                      <div className="verification-status-head">
+                        <strong>{getVerificationStatusLabel(verificationData.status)}</strong>
+                        {verificationData.status === "approved" ? (
+                          <VerificationBadge status={verificationData.status} reviewedAt={verificationData.reviewedAt} />
+                        ) : null}
+                      </div>
+                      {verificationData.status === "none" ? (
+                        <p>Реквизиты ещё не отправлены на проверку. Мы сверим ИНН и наименование с данными ЕГРЮЛ.</p>
+                      ) : null}
+                      {verificationData.status === "pending" ? (
+                        <p>
+                          Заявка отправлена{verificationData.requestedAt ? ` ${formatVerificationDate(verificationData.requestedAt)}` : ""}. Проверка обычно занимает до одного рабочего дня.
+                        </p>
+                      ) : null}
+                      {verificationData.status === "approved" ? (
+                        <p>
+                          Компания подтверждена{verificationData.reviewedAt ? ` ${formatVerificationDate(verificationData.reviewedAt)}` : ""}. Бейдж виден в профиле и объявлениях.
+                        </p>
+                      ) : null}
+                      {verificationData.status === "rejected" ? (
+                        <p>
+                          Проверка отклонена{verificationData.reviewedAt ? ` ${formatVerificationDate(verificationData.reviewedAt)}` : ""}.{verificationData.reason ? ` Причина: ${verificationData.reason}` : ""}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="profile-data-grid">
+                      <div className="profile-data-item"><span>ИНН</span><strong>{verificationData.inn || "Не указан"}</strong></div>
+                      <div className="profile-data-item"><span>Полное наименование</span><strong>{verificationData.legalName || "Не указано"}</strong></div>
+                      <div className="profile-data-item"><span>ОГРН / ОГРНИП</span><strong>{verificationData.ogrn || "Не указан"}</strong></div>
+                      <div className="profile-data-item"><span>Юридический адрес</span><strong>{verificationData.legalAddress || "Не указан"}</strong></div>
+                    </div>
+
+                    {!verificationData.inn && verificationData.status !== "pending" ? (
+                      <p className="form-helper">Сначала заполните ИНН и реквизиты в разделе «Изменение данных».</p>
+                    ) : null}
+                  </>
+                ) : null}
+
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={() => setProfileStep("view")}>Назад</button>
+                  <button type="button" className="button button-secondary" onClick={startProfileEdit}>
+                    {verificationData?.inn ? "Изменить реквизиты" : "Добавить ИНН в профиле"}
+                  </button>
+                  {verificationData && verificationData.status !== "pending" ? (
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={requestVerification}
+                      disabled={verificationSubmitting || !verificationData.inn}
+                    >
+                      {verificationSubmitting
+                        ? "Отправка..."
+                        : verificationData.status === "approved"
+                          ? "Пройти проверку заново"
+                          : verificationData.status === "rejected"
+                            ? "Отправить повторно"
+                            : "Отправить на проверку"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             ) : null}
 
 
@@ -554,6 +939,45 @@ function CreatePage() {
                 <label className="field field-wide"><span>Описание компании<RequiredMark /></span><textarea name="profileDescription" rows="4" required aria-required="true" minLength={LIMITS.profile.descriptionMin} maxLength={LIMITS.profile.descriptionMax} value={profileForm.description} onChange={(event) => updateProfileField("description", event.target.value)} /></label>
                 <label className="field field-wide"><span>О компании<RequiredMark /></span><textarea name="profileAbout" rows="5" required aria-required="true" minLength={LIMITS.profile.aboutMin} maxLength={LIMITS.profile.aboutMax} value={profileForm.about} onChange={(event) => updateProfileField("about", event.target.value)} /></label>
                 <label className="field field-wide"><span>Теги</span><input name="profileSpecializations" maxLength={LIMITS.profile.specializationsMax * (LIMITS.profile.specializationMax + 2)} value={profileForm.specializations} onChange={(event) => updateProfileField("specializations", event.target.value)} placeholder="Оптовые поставки, HoReCa, Розница" /></label>
+                <div className="profile-legal-block field-wide">
+                  <div className="profile-legal-head">
+                    <strong>Реквизиты</strong>
+                    <span className="form-helper">Необязательно. ИНН виден в профиле компании и нужен для проверки.</span>
+                  </div>
+                  <div className="profile-legal-grid">
+                    <label className="field">
+                      <span>ИНН</span>
+                      <div className="dadata-row">
+                        <input name="profileInn" inputMode="numeric" maxLength={12} value={profileForm.inn} onChange={(event) => updateProfileField("inn", event.target.value.replace(/\D+/g, ""))} placeholder="10 или 12 цифр" />
+                        <button type="button" className="button button-secondary" onClick={checkDadata} disabled={dadataLoading || !canLookupInn(profileForm.inn)}>
+                          {dadataLoading ? "Проверка..." : "Проверить по ЕГРЮЛ"}
+                        </button>
+                      </div>
+                      {getInnHint(profileForm.inn) ? <span className="form-helper">{getInnHint(profileForm.inn)}</span> : null}
+                    </label>
+                    <label className="field">
+                      <span>Полное наименование</span>
+                      <input name="profileLegalName" maxLength={VERIFICATION_LIMITS.legalNameMax} value={profileForm.legalName} onChange={(event) => updateProfileField("legalName", event.target.value)} placeholder="ООО «Название»" />
+                      {isIndividualInn(profileForm.inn) ? <span className="form-helper">Для ИП укажите ФИО полностью.</span> : null}
+                    </label>
+                    <label className="field">
+                      <span>ОГРН / ОГРНИП</span>
+                      <input name="profileOgrn" inputMode="numeric" maxLength={15} value={profileForm.ogrn} onChange={(event) => updateProfileField("ogrn", event.target.value.replace(/\D+/g, ""))} placeholder="13 или 15 цифр" />
+                    </label>
+                    <label className="field">
+                      <span>Юридический адрес</span>
+                      <input name="profileLegalAddress" maxLength={VERIFICATION_LIMITS.legalAddressMax} value={profileForm.legalAddress} onChange={(event) => updateProfileField("legalAddress", event.target.value)} placeholder="Город, улица, дом" />
+                    </label>
+                  </div>
+                  {["approved", "pending"].includes(profileCompanyData?.verificationStatus) ? (
+                    <p className="form-helper">Изменение реквизитов сбросит текущий статус проверки — потребуется повторная проверка.</p>
+                  ) : null}
+                  {isIndividualInn(profileForm.inn) ? (
+                    <p className="form-helper">Демо: для ИП используйте только тестовые синтетические данные — реальные ФИО и адреса не добавляйте.</p>
+                  ) : null}
+                  {dadataNotice ? <div className="success-banner">{dadataNotice}</div> : null}
+                  {dadataError ? <div className="error-banner">{dadataError}</div> : null}
+                </div>
                 {profileError ? <div className="error-banner">{profileError}</div> : null}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeProfileModal}>Отмена</button>

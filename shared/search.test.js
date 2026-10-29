@@ -120,3 +120,36 @@ test("поиск поставщиков находит по навыку", () =>
   assert.equal(results.length, 1);
   assert.equal(results[0].item.companyId, "cmp-1");
 });
+
+test("поиск поставщиков находит по ИНН", () => {
+  const suppliers = [
+    {
+      id: "cmp-1",
+      companyId: "cmp-1",
+      name: "ООО Ромашка",
+      industry: "Производство",
+      city: "Москва",
+      inn: "7707083893",
+      summary: "Краткое описание.",
+      description: "Полное описание.",
+      skills: ["Упаковка"],
+    },
+    {
+      id: "cmp-2",
+      companyId: "cmp-2",
+      name: "ООО Лютик",
+      industry: "Логистика",
+      city: "Казань",
+      inn: "7736050003",
+      summary: "Краткое описание.",
+      description: "Полное описание.",
+      skills: ["Перевозки"],
+    },
+  ];
+
+  const results = searchSuppliers(suppliers, "7707083893");
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].item.companyId, "cmp-1");
+  assert.ok(results[0].matchedFields.includes("inn"));
+});

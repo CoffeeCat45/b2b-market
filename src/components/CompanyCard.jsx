@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { getCompanyDescription, hasCompanyDescription } from "../lib/companyText";
+import VerificationBadge from "./VerificationBadge";
+import VerificationWarning from "./VerificationWarning";
 
 function CompanyCard({ supplier, onTagClick }) {
   const { user } = useAuth();
@@ -24,6 +26,7 @@ function CompanyCard({ supplier, onTagClick }) {
   const contactHref = user ? contactPath : `/login?next=${encodeURIComponent(contactPath)}`;
   const isOwnCompany = Boolean(user?.companyId && user.companyId === supplier.companyId);
   const canContact = Boolean(user?.companyId && !isOwnCompany);
+  const hasRating = Number(supplier.rating) > 0;
 
   return (
     <article className="card company-card card-clickable" role="link" tabIndex={0} onClick={openCard} onKeyDown={handleKeyDown}>
@@ -31,10 +34,17 @@ function CompanyCard({ supplier, onTagClick }) {
         {supplier.avatarUrl ? null : getInitials(supplier.name)}
       </div>
       <div className="company-body">
-        <div className="card-topline"><span className="pill pill-light">{supplier.industry}</span><span className="rating">★ {supplier.rating}</span></div>
+        <div className="card-topline">
+          <span className="pill pill-light">{supplier.industry}</span>
+          <span className="company-card-badges">
+            <VerificationBadge status={supplier.verificationStatus} reviewedAt={supplier.verificationReviewedAt} />
+            <span className="rating">{hasRating ? `★ ${supplier.rating}` : "Нет отзывов"}</span>
+          </span>
+        </div>
         <h3>{supplier.name}</h3>
         <p className="company-city">{supplier.city}</p>
         <p className={hasDescription ? undefined : "muted"}>{getCompanyDescription(summaryCompany)}</p>
+        <VerificationWarning status={supplier.verificationStatus} variant="compact" />
         <div className="card-tags">
           {skills.map((skill) => (
             onTagClick ? (

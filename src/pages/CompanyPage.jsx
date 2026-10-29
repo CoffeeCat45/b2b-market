@@ -4,6 +4,8 @@ import Layout from "../components/Layout";
 import Tabs from "../components/Tabs";
 import ListingCard from "../components/ListingCard";
 import AsyncState from "../components/AsyncState";
+import VerificationBadge from "../components/VerificationBadge";
+import VerificationWarning from "../components/VerificationWarning";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
@@ -130,14 +132,18 @@ function CompanyPage() {
             </div>
             <div className="company-hero-body">
               <span className="pill">{company.industry}</span>
-              <h1>{company.name}</h1>
+              <div className="company-title-row">
+                <h1>{company.name}</h1>
+                <VerificationBadge status={company.verificationStatus} reviewedAt={company.verificationReviewedAt} />
+              </div>
               <div className="detail-meta">
                 <span>{company.city}</span>
                 {company.createdAt ? <span>На платформе с {company.createdAt}</span> : null}
-                <span>★ {company.rating}</span>
+                <span>{Number(company.rating) > 0 ? `★ ${company.rating}` : "Нет отзывов"}</span>
                 <span>{specializations.join(" · ")}</span>
               </div>
               <p className={hasCompanyDescription(company) ? undefined : "muted"}>{getCompanyDescription(company)}</p>
+              <VerificationWarning status={company.verificationStatus} variant="full" />
               {isOwnCompany && isCompanyProfileIncomplete(company) ? (
                 <Link to="/create?profile=edit" className="inline-cta">Заполнить описание</Link>
               ) : null}
@@ -261,6 +267,10 @@ function CompanyPage() {
               <h2>Данные компании</h2>
               {canViewCompanyData ? (
                 <div className="info-grid company-data-grid">
+                  <div>
+                    <span>ИНН</span>
+                    <strong>{company.inn || "Не указано"}</strong>
+                  </div>
                   <div>
                     <span>Контактное лицо</span>
                     <strong>{company.contactName || "Не указано"}</strong>

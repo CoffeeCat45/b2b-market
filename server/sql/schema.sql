@@ -13,6 +13,15 @@
   about TEXT NOT NULL,
   specializations JSONB NOT NULL DEFAULT '[]'::jsonb,
   reviews JSONB NOT NULL DEFAULT '[]'::jsonb,
+  inn TEXT NOT NULL DEFAULT '',
+  legal_name TEXT NOT NULL DEFAULT '',
+  ogrn TEXT NOT NULL DEFAULT '',
+  legal_address TEXT NOT NULL DEFAULT '',
+  verification_status TEXT NOT NULL DEFAULT 'none',
+  verification_reason TEXT NOT NULL DEFAULT '',
+  verification_requested_at TIMESTAMPTZ,
+  verification_reviewed_at TIMESTAMPTZ,
+  verification_reviewed_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -33,6 +42,33 @@ ALTER TABLE companies
 
 ALTER TABLE companies
   ADD COLUMN IF NOT EXISTS avatar_scale INTEGER NOT NULL DEFAULT 100;
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS inn TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS legal_name TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS ogrn TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS legal_address TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'none';
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS verification_reason TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS verification_requested_at TIMESTAMPTZ;
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS verification_reviewed_at TIMESTAMPTZ;
+
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS verification_reviewed_by TEXT;
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -191,3 +227,15 @@ CREATE INDEX IF NOT EXISTS chats_company_b_id_idx ON chats (company_b_id);
 CREATE INDEX IF NOT EXISTS chats_order_id_idx ON chats (order_id);
 CREATE INDEX IF NOT EXISTS chat_messages_chat_created_idx ON chat_messages (chat_id, created_at, id);
 CREATE INDEX IF NOT EXISTS users_company_id_idx ON users (company_id);
+
+DO $$
+BEGIN
+  ALTER TABLE companies
+    ADD CONSTRAINT companies_verification_status_check
+    CHECK (verification_status IN ('none', 'pending', 'approved', 'rejected'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS companies_inn_unique_idx ON companies (inn) WHERE inn <> '';
+CREATE INDEX IF NOT EXISTS companies_verification_status_idx ON companies (verification_status, verification_requested_at DESC);

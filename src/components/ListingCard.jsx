@@ -1,5 +1,7 @@
 ﻿import { Link } from "react-router-dom";
 import CompatibilityBadge from "./CompatibilityBadge";
+import VerificationBadge from "./VerificationBadge";
+import VerificationWarning from "./VerificationWarning";
 
 function ListingCard({ item, featured = false, onTagClick, compatibility = null }) {
   const tags = Array.isArray(item.tags) ? item.tags : [];
@@ -29,10 +31,12 @@ function ListingCard({ item, featured = false, onTagClick, compatibility = null 
       <h3 className="listing-title">{item.title}</h3>
       <div className="listing-meta">
         <strong>{item.company}</strong>
+        <VerificationBadge status={item.verificationStatus} reviewedAt={item.verificationReviewedAt} />
         <span>{item.city}</span>
       </div>
       <CompatibilityBadge compatibility={compatibility} />
       <p>{item.summary}</p>
+      <VerificationWarning status={item.verificationStatus} variant="compact" />
       <div className="card-tags">
         {tags.map((tag) => (
           onTagClick ? (

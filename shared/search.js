@@ -43,6 +43,7 @@ const SUPPLIER_FIELDS = [
   { key: "industry", weight: 3, phraseBonus: 2 },
   { key: "summary", weight: 2.5 },
   { key: "description", weight: 1.2 },
+  { key: "inn", weight: 2 },
   { key: "city", weight: 1 },
 ];
 
