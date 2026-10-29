@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import FilterSidebar from "../components/FilterSidebar";
@@ -6,8 +6,10 @@ import CompanyCard from "../components/CompanyCard";
 import AsyncState from "../components/AsyncState";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseRussianDate } from "../lib/date";
+import { searchSuppliers } from "../../shared/search.js";
 
 const SORT_OPTIONS = [
+  { value: "relevance", label: "По релевантности" },
   { value: "date_desc", label: "Сначала свежие" },
   { value: "rating_desc", label: "По рейтингу: высокий сначала" },
   { value: "rating_asc", label: "По рейтингу: низкий сначала" },
@@ -23,7 +25,8 @@ function SuppliersPage() {
   const [selectedCities, setSelectedCities] = useState([]);
   const [minRating, setMinRating] = useState("");
   const [maxRating, setMaxRating] = useState("");
-  const [sortBy, setSortBy] = useState("date_desc");
+  const [sortBy, setSortBy] = useState(urlQuery.trim() ? "relevance" : "date_desc");
+  const sortManualRef = useRef(false);
   const { suppliers, loading, error, reload } = useMarketplaceData();
 
   const cityOptions = useMemo(() => [...new Set(suppliers.map((item) => item.city))].sort((a, b) => a.localeCompare(b, "ru")), [suppliers]);
@@ -50,7 +53,15 @@ function SuppliersPage() {
 
   const handleQueryChange = (value) => {
     setQuery(value);
+    if (!sortManualRef.current) {
+      setSortBy(value.trim() ? "relevance" : "date_desc");
+    }
     syncUrl(value, category);
+  };
+
+  const handleSortChange = (value) => {
+    sortManualRef.current = true;
+    setSortBy(value);
   };
 
   const handleCategoryChange = (value) => {
@@ -81,30 +92,39 @@ function SuppliersPage() {
     const normalizedMin = ratingValidation.min;
     const normalizedMax = ratingValidation.max;
 
-    const nextSuppliers = suppliers.filter((item) => {
-      const skillsText = Array.isArray(item.skills) ? item.skills.join(" ") : "";
-      const matchesQuery = !query || `${item.name} ${item.summary} ${item.description} ${skillsText}`.toLowerCase().includes(query.toLowerCase());
+    const matchedSuppliers = suppliers.filter((item) => {
       const matchesCategory = !category || item.industry === category;
       const matchesDate = matchesDateFilter(item.createdAt, dateFilter);
       const matchesCity = !selectedCities.length || selectedCities.includes(item.city);
       const matchesMinRating = normalizedMin === null || item.rating >= normalizedMin;
       const matchesMaxRating = normalizedMax === null || item.rating <= normalizedMax;
-      return matchesQuery && matchesCategory && matchesDate && matchesCity && matchesMinRating && matchesMaxRating;
+      return matchesCategory && matchesDate && matchesCity && matchesMinRating && matchesMaxRating;
     });
 
-    return nextSuppliers.sort((a, b) => {
+    const results = query.trim()
+      ? searchSuppliers(matchedSuppliers, query)
+      : matchedSuppliers.map((item) => ({ item, score: 0 }));
+
+    results.sort((a, b) => {
+      if (sortBy === "relevance") {
+        const scoreDiff = (b.score || 0) - (a.score || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+      }
+
       if (sortBy === "rating_desc") {
-        return b.rating - a.rating;
+        return b.item.rating - a.item.rating;
       }
 
       if (sortBy === "rating_asc") {
-        return a.rating - b.rating;
+        return a.item.rating - b.item.rating;
       }
 
-      const dateA = parseRussianDate(a.createdAt)?.getTime() ?? 0;
-      const dateB = parseRussianDate(b.createdAt)?.getTime() ?? 0;
+      const dateA = parseRussianDate(a.item.createdAt)?.getTime() ?? 0;
+      const dateB = parseRussianDate(b.item.createdAt)?.getTime() ?? 0;
       return dateB - dateA;
     });
+
+    return results.map((entry) => entry.item);
   }, [suppliers, query, category, dateFilter, selectedCities, ratingValidation, sortBy]);
 
   const toggleCity = (city) => {
@@ -119,6 +139,7 @@ function SuppliersPage() {
     setSelectedCities([]);
     setMinRating("");
     setMaxRating("");
+    sortManualRef.current = false;
     setSortBy("date_desc");
   };
 
@@ -172,7 +193,7 @@ function SuppliersPage() {
                     <span>Сортировка</span>
                     <label className="catalog-sort-control">
                       <span className="visually-hidden">Сортировка поставщиков</span>
-                      <select name="suppliersSort" value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                      <select name="suppliersSort" value={sortBy} onChange={(event) => handleSortChange(event.target.value)}>
                         {SORT_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}

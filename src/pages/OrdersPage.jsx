@@ -1,13 +1,17 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import FilterSidebar from "../components/FilterSidebar";
 import ListingCard from "../components/ListingCard";
 import AsyncState from "../components/AsyncState";
+import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseDateValue } from "../lib/date";
+import { searchOrders } from "../../shared/search.js";
+import { getOrderCompatibility } from "../../shared/compatibility.js";
 
 const SORT_OPTIONS = [
+  { value: "relevance", label: "По релевантности" },
   { value: "date_desc", label: "Сначала свежие" },
   { value: "popular_desc", label: "Сначала популярные" },
   { value: "max_budget_asc", label: "По цене: максимум по возрастанию" },
@@ -29,10 +33,32 @@ function OrdersPage() {
   const [locationHint, setLocationHint] = useState("");
   const [minBudget, setMinBudget] = useState("");
   const [maxBudget, setMaxBudget] = useState("");
-  const [sortBy, setSortBy] = useState("date_desc");
-  const { orders, loading, error, reload } = useMarketplaceData();
+  const [sortBy, setSortBy] = useState(urlQuery.trim() ? "relevance" : "date_desc");
+  const sortManualRef = useRef(false);
+  const { user } = useAuth();
+  const { orders, companies, loading, error, reload } = useMarketplaceData();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
+  const userCompany = useMemo(() => {
+    if (!user?.companyId) return null;
+
+    const ownCompany = companies.find((company) => company.id === user.companyId);
+    if (ownCompany) {
+      return {
+        id: ownCompany.id,
+        industry: ownCompany.industry,
+        city: ownCompany.city,
+        specializations: ownCompany.specializations,
+      };
+    }
+
+    return {
+      id: user.companyId,
+      industry: user.industry,
+      city: user.companyCity,
+      specializations: user.specializations,
+    };
+  }, [companies, user]);
 
   const syncUrl = useCallback((nextQuery, nextCategory) => {
     const params = new URLSearchParams();
@@ -55,7 +81,15 @@ function OrdersPage() {
 
   const handleQueryChange = (value) => {
     setQuery(value);
+    if (!sortManualRef.current) {
+      setSortBy(value.trim() ? "relevance" : "date_desc");
+    }
     syncUrl(value, category);
+  };
+
+  const handleSortChange = (value) => {
+    sortManualRef.current = true;
+    setSortBy(value);
   };
 
   const handleCategoryChange = (value) => {
@@ -126,36 +160,45 @@ function OrdersPage() {
     const majorCityQuery = appliedMajorCity.trim().toLowerCase();
     const locationQuery = appliedLocation.trim().toLowerCase();
 
-    const nextOrders = orders.filter((item) => {
-      const tagsText = Array.isArray(item.tags) ? item.tags.join(" ") : String(item.tags || "");
-      const matchesQuery = !query || `${item.title} ${item.company} ${item.summary} ${tagsText}`.toLowerCase().includes(query.toLowerCase());
+    const matchedOrders = orders.filter((item) => {
       const matchesCategory = !category || item.category === category;
       const matchesDate = matchesDateFilter(item.publishedAt, dateFilter);
       const matchesMajorCity = !majorCityQuery || (item.cityMajor || "").toLowerCase() === majorCityQuery;
       const matchesLocation = !locationQuery || (item.locationDetail || "").toLowerCase() === locationQuery;
       const matchesMinBudget = normalizedMin === null || item.budgetTo >= normalizedMin;
       const matchesMaxBudget = normalizedMax === null || item.budgetFrom <= normalizedMax;
-      return matchesQuery && matchesCategory && matchesDate && matchesMajorCity && matchesLocation && matchesMinBudget && matchesMaxBudget;
+      return matchesCategory && matchesDate && matchesMajorCity && matchesLocation && matchesMinBudget && matchesMaxBudget;
     });
 
-    return nextOrders.sort((a, b) => {
+    const results = query.trim()
+      ? searchOrders(matchedOrders, query)
+      : matchedOrders.map((item) => ({ item, score: 0 }));
+
+    results.sort((a, b) => {
+      if (sortBy === "relevance") {
+        const scoreDiff = (b.score || 0) - (a.score || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+      }
+
       if (sortBy === "popular_desc") {
-        const viewsDiff = (b.viewsCount || 0) - (a.viewsCount || 0);
+        const viewsDiff = (b.item.viewsCount || 0) - (a.item.viewsCount || 0);
         if (viewsDiff !== 0) return viewsDiff;
       }
 
       if (sortBy === "max_budget_asc") {
-        return a.budgetTo - b.budgetTo;
+        return a.item.budgetTo - b.item.budgetTo;
       }
 
       if (sortBy === "min_budget_desc") {
-        return b.budgetFrom - a.budgetFrom;
+        return b.item.budgetFrom - a.item.budgetFrom;
       }
 
-      const aDate = parseDateValue(a.publishedAt)?.getTime() || 0;
-      const bDate = parseDateValue(b.publishedAt)?.getTime() || 0;
+      const aDate = parseDateValue(a.item.publishedAt)?.getTime() || 0;
+      const bDate = parseDateValue(b.item.publishedAt)?.getTime() || 0;
       return bDate - aDate;
     });
+
+    return results.map((entry) => entry.item);
   }, [orders, query, category, dateFilter, appliedMajorCity, appliedLocation, budgetValidation, sortBy]);
 
   const applyMajorCity = (value) => {
@@ -192,6 +235,7 @@ function OrdersPage() {
     setLocationHint("");
     setMinBudget("");
     setMaxBudget("");
+    sortManualRef.current = false;
     setSortBy("date_desc");
   };
 
@@ -271,7 +315,7 @@ function OrdersPage() {
                     <span>Сортировка</span>
                     <label className="catalog-sort-control">
                       <span className="visually-hidden">Сортировка заказов</span>
-                      <select name="ordersSort" value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                      <select name="ordersSort" value={sortBy} onChange={(event) => handleSortChange(event.target.value)}>
                         {SORT_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
@@ -281,7 +325,14 @@ function OrdersPage() {
                     </label>
                   </div>
                   <div className="catalog-list">
-                    {filteredOrders.map((item) => <ListingCard key={item.id} item={item} onTagClick={handleQueryChange} />)}
+                    {filteredOrders.map((item) => (
+                      <ListingCard
+                        key={item.id}
+                        item={item}
+                        onTagClick={handleQueryChange}
+                        compatibility={getOrderCompatibility(userCompany, item)}
+                      />
+                    ))}
                   </div>
                 </>
               ) : (

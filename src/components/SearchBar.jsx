@@ -1,4 +1,5 @@
 ﻿import { useMemo, useState } from "react";
+import { normalizeText } from "../../shared/search.js";
 
 function SearchBar({
   query,
@@ -6,27 +7,28 @@ function SearchBar({
   onQueryChange,
   onTypeChange,
   onSubmit,
-  categories = [],
+  suggestions = [],
   compact = false,
 }) {
   const [isFocused, setIsFocused] = useState(false);
 
-  const suggestions = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+  const matchedSuggestions = useMemo(() => {
+    const normalized = normalizeText(query);
 
     if (!normalized) {
       return [];
     }
 
-    return categories
-      .filter((category) => category.toLowerCase().includes(normalized))
-      .slice(0, 4);
-  }, [categories, query]);
+    return suggestions
+      .filter((suggestion) => normalizeText(suggestion.value).includes(normalized))
+      .slice(0, 6);
+  }, [suggestions, query]);
 
-  const showSuggestions = isFocused && suggestions.length > 0;
+  const showSuggestions = isFocused && matchedSuggestions.length > 0;
 
   const handleSuggestionClick = (suggestion) => {
-    onQueryChange(suggestion);
+    if (suggestion.type) onTypeChange(suggestion.type);
+    onQueryChange(suggestion.value);
     setIsFocused(false);
   };
 
@@ -36,7 +38,7 @@ function SearchBar({
         <input
           name="searchQuery"
           type="text"
-          placeholder="Найти заказ или категорию"
+          placeholder="Найти заказ, поставщика или услугу"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           onFocus={() => setIsFocused(true)}
@@ -44,15 +46,16 @@ function SearchBar({
         />
         {showSuggestions ? (
           <div className="search-suggestions">
-            {suggestions.map((suggestion) => (
+            {matchedSuggestions.map((suggestion) => (
               <button
-                key={suggestion}
+                key={`${suggestion.type}-${suggestion.value}`}
                 type="button"
                 className="search-suggestion"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => handleSuggestionClick(suggestion)}
               >
-                {suggestion}
+                <span>{suggestion.value}</span>
+                {suggestion.label ? <span className="search-suggestion-hint">{suggestion.label}</span> : null}
               </button>
             ))}
           </div>

@@ -1,10 +1,12 @@
-﻿import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import AsyncState from "../components/AsyncState";
+import CompatibilityBadge from "../components/CompatibilityBadge";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { apiFetch } from "../lib/api";
+import { getOrderCompatibility } from "../../shared/compatibility.js";
 import {
   getCompanyDescription,
   hasCompanyDescription,
@@ -20,6 +22,26 @@ function ListingPage() {
   const item = orders.find((entry) => entry.id === id);
   const tags = Array.isArray(item?.tags) ? item.tags : [];
   const isOwner = Boolean(user?.companyId && item?.companyId === user.companyId);
+  const userCompany = useMemo(() => {
+    if (!user?.companyId) return null;
+
+    const ownCompany = companies.find((company) => company.id === user.companyId);
+    if (ownCompany) {
+      return {
+        id: ownCompany.id,
+        industry: ownCompany.industry,
+        city: ownCompany.city,
+        specializations: ownCompany.specializations,
+      };
+    }
+
+    return {
+      id: user.companyId,
+      industry: user.industry,
+      city: user.companyCity,
+      specializations: user.specializations,
+    };
+  }, [companies, user]);
 
   useEffect(() => {
     if (item) {
@@ -73,6 +95,7 @@ function ListingPage() {
   }
 
   const company = companies.find((entry) => entry.id === item.companyId);
+  const compatibility = getOrderCompatibility(userCompany, item);
   const chatPath = `/chats?chatCompany=${encodeURIComponent(item.companyId)}&orderId=${encodeURIComponent(item.id)}`;
   const chatHref = user ? chatPath : `/login?next=${encodeURIComponent(chatPath)}`;
   const isOwnOrder = Boolean(user?.companyId && item.companyId === user.companyId);
@@ -98,6 +121,7 @@ function ListingPage() {
                   <span className="muted">{item.date}</span>
                 </div>
                 <h1>{item.title}</h1>
+                <CompatibilityBadge compatibility={compatibility} />
                 <div className="detail-meta">
                   <strong>{item.company}</strong>
                   <span>{item.city}</span>

@@ -7,6 +7,29 @@ import CompanyCard from "../components/CompanyCard";
 import AsyncState from "../components/AsyncState";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { parseDateValue } from "../lib/date";
+import { normalizeText } from "../../shared/search.js";
+
+function topValues(values, limit) {
+  const counts = new Map();
+
+  for (const raw of values) {
+    const text = String(raw || "").trim();
+    const key = normalizeText(text);
+    if (!key) continue;
+
+    const entry = counts.get(key);
+    if (entry) {
+      entry.count += 1;
+    } else {
+      counts.set(key, { value: text, count: 1 });
+    }
+  }
+
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, "ru"))
+    .slice(0, limit)
+    .map((entry) => entry.value);
+}
 
 function HomePage() {
   const navigate = useNavigate();
@@ -15,6 +38,44 @@ function HomePage() {
   const { orders, suppliers, loading, error, reload } = useMarketplaceData();
 
   const categories = useMemo(() => [...new Set(orders.map((item) => item.category))], [orders]);
+  const supplierIndustries = useMemo(
+    () => [...new Set(suppliers.map((item) => item.industry).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
+    [suppliers],
+  );
+  const topOrderTags = useMemo(
+    () => topValues(orders.flatMap((item) => (Array.isArray(item.tags) ? item.tags : [])), 4),
+    [orders],
+  );
+  const topSupplierSkills = useMemo(
+    () => topValues(suppliers.flatMap((item) => (Array.isArray(item.skills) ? item.skills : [])), 4),
+    [suppliers],
+  );
+  const searchSuggestions = useMemo(() => {
+    const pools = [
+      categories.map((value) => ({ value, type: "orders", label: "категория" })),
+      supplierIndustries.map((value) => ({ value, type: "suppliers", label: "отрасль" })),
+      topOrderTags.map((value) => ({ value, type: "orders", label: "тег" })),
+      topSupplierSkills.map((value) => ({ value, type: "suppliers", label: "навык" })),
+    ];
+    const seen = new Set();
+    const result = [];
+    const maxDepth = Math.max(0, ...pools.map((pool) => pool.length));
+
+    for (let index = 0; index < maxDepth; index += 1) {
+      for (const pool of pools) {
+        const suggestion = pool[index];
+        if (!suggestion) continue;
+
+        const key = `${suggestion.type}:${normalizeText(suggestion.value)}`;
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+        result.push(suggestion);
+      }
+    }
+
+    return result;
+  }, [categories, supplierIndustries, topOrderTags, topSupplierSkills]);
   const featuredOrders = useMemo(() => (
     [...orders]
       .sort((a, b) => (parseDateValue(b.publishedAt ?? b.date)?.getTime() || 0) - (parseDateValue(a.publishedAt ?? a.date)?.getTime() || 0))
@@ -93,7 +154,7 @@ function HomePage() {
               onQueryChange={setQuery}
               onTypeChange={setType}
               onSubmit={handleSearch}
-              categories={categories}
+              suggestions={searchSuggestions}
             />
             <div className="hero-metrics">
               <div>

@@ -1,6 +1,7 @@
 ﻿import { Link } from "react-router-dom";
+import CompatibilityBadge from "./CompatibilityBadge";
 
-function ListingCard({ item, featured = false, onTagClick }) {
+function ListingCard({ item, featured = false, onTagClick, compatibility = null }) {
   const tags = Array.isArray(item.tags) ? item.tags : [];
   const openCard = () => {
     window.open(`#/listing/${item.id}`, "_blank", "noopener,noreferrer");
@@ -30,6 +31,7 @@ function ListingCard({ item, featured = false, onTagClick }) {
         <strong>{item.company}</strong>
         <span>{item.city}</span>
       </div>
+      <CompatibilityBadge compatibility={compatibility} />
       <p>{item.summary}</p>
       <div className="card-tags">
         {tags.map((tag) => (
