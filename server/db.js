@@ -47,7 +47,8 @@ const poolConfig = connectionString
       ssl: shouldUseSsl(rawConnectionString) ? { rejectUnauthorized: false } : false,
       max,
       connectionTimeoutMillis: 5000,
-      idleTimeoutMillis: 10000,
+      // Держим соединение тёплым: pooler не переавторизует его на каждый всплеск запросов.
+      idleTimeoutMillis: 60000,
       query_timeout: 10000,
       statement_timeout: 10000,
     }

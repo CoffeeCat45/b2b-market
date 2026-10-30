@@ -3,7 +3,7 @@ import { apiFetch } from "../lib/api";
 import { CONNECTION_RESTORED_EVENT } from "../lib/connection";
 import { useAuth } from "./AuthContext";
 
-const CACHE_TTL_MS = 60000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 const EMPTY_DATA = { orders: [], suppliers: [], companies: [], updatedAt: 0 };
 
 export const MarketplaceDataContext = createContext(null);

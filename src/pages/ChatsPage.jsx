@@ -8,6 +8,7 @@ import { getAvatarStyle, getInitials } from "../lib/avatar";
 import { LIMITS, validateAttachments } from "../../shared/validation.js";
 
 const MIB = 1024 * 1024;
+const CHAT_POLL_INTERVAL_MS = 10000;
 const CHAT_STATUS_OPTIONS = [
   { value: "negotiation", label: "В переговорах" },
   { value: "closed", label: "Закрыто" },
@@ -323,7 +324,7 @@ function ChatsPage() {
       loadChats();
       if (selectedChatId) loadNewMessages(selectedChatId);
     };
-    const intervalId = window.setInterval(refresh, 4000);
+    const intervalId = window.setInterval(refresh, CHAT_POLL_INTERVAL_MS);
     document.addEventListener("visibilitychange", refresh);
 
     return () => {

@@ -2032,6 +2032,30 @@ async function cleanupExpiredSessions() {
   return result.rowCount;
 }
 
+// Поднимать при каждом изменении схемы в ensureSecuritySchema/ensureVerificationSchema.
+const SCHEMA_VERSION = "2026-10-30";
+
+async function getAppliedSchemaVersion() {
+  try {
+    const result = await pool.query("SELECT value FROM app_meta WHERE key = 'schema_version'");
+    return result.rows[0]?.value || "";
+  } catch (error) {
+    if (error.code === "42P01") return "";
+    throw error;
+  }
+}
+
+async function applySchemaChanges() {
+  await ensureSecuritySchema();
+  await ensureVerificationSchema();
+  await pool.query("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  await pool.query(
+    `INSERT INTO app_meta (key, value) VALUES ('schema_version', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [SCHEMA_VERSION],
+  );
+}
+
 const DB_INIT_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000];
 let databaseInitPromise = null;
 
@@ -2047,8 +2071,10 @@ async function initializeDatabase() {
       try {
         markWaking();
         await testConnection();
-        await ensureSecuritySchema();
-        await ensureVerificationSchema();
+        if ((await getAppliedSchemaVersion()) !== SCHEMA_VERSION) {
+          await applySchemaChanges();
+          console.log(`Схема обновлена до версии ${SCHEMA_VERSION}.`);
+        }
         markSchemaReady(true);
         const removedSessions = await cleanupExpiredSessions();
         if (removedSessions) console.log(`Удалено просроченных сессий: ${removedSessions}`);

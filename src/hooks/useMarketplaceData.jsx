@@ -5,7 +5,7 @@ export function useMarketplaceData() {
   const value = useContext(MarketplaceDataContext);
   const reload = value?.reload;
 
-  // Кэш живёт 60 секунд: при заходе на страницу проверяем свежесть и при необходимости обновляем.
+  // Кэш живёт 5 минут: при заходе на страницу проверяем свежесть и при необходимости обновляем.
   useEffect(() => {
     if (reload) void reload({ force: false });
   }, [reload]);
