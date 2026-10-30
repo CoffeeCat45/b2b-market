@@ -49,7 +49,7 @@ export function useSemanticSearch({ enabled, modelId, entityType, items, query }
     setStatus("loading-index");
     setError("");
 
-    loadEmbeddingIndex(modelId)
+    loadEmbeddingIndex(modelId, { entityType, items })
       .then((data) => {
         if (!active) return;
         setIndex(data);
@@ -64,7 +64,7 @@ export function useSemanticSearch({ enabled, modelId, entityType, items, query }
     return () => {
       active = false;
     };
-  }, [enabled, modelId, entityType]);
+  }, [enabled, modelId, entityType, items]);
 
   useEffect(() => {
     if (!enabled || !index || !debouncedQuery) return undefined;

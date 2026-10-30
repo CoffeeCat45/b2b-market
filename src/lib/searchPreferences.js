@@ -4,32 +4,32 @@ export const SEARCH_PREFERENCES_EVENT = "search-preferences:changed";
 export const SEARCH_MODES = [
   {
     value: "smart",
-    label: "Умный поиск без модели",
-    hint: "Синонимы, опечатки и сортировка по релевантности. Ничего не скачивается.",
+    label: "Обычный поиск (по словам)",
+    hint: "Ищет точные слова и опечатки, синонимы почти не понимает. Для смысла включите нейропоиск.",
   },
   {
     value: "neural",
-    label: "Нейросетевой поиск (локально)",
-    hint: "Модель работает в браузере. Первый запуск скачает её и сохранит в кэше устройства.",
+    label: "Нейропоиск по смыслу (локально)",
+    hint: "Понимает синонимы: «уборка» найдёт «клининг». Модель работает в браузере; первый запуск скачает её и сохранит на устройстве.",
   },
 ];
 
 export const SEARCH_MODELS = [
   {
     value: "compact",
-    label: "Компактная — быстрее",
-    hint: "ruBERT-tiny2, около 30 МБ. Лучше для телефона и слабого интернета.",
+    label: "Компактная — для слабых устройств",
+    hint: "ruBERT-tiny2, около 30 МБ. Быстрее, но хуже различает близкие темы.",
   },
   {
     value: "powerful",
-    label: "Мощная — точнее",
-    hint: "multilingual-e5-small, около 120 МБ. Точнее, но первый запуск дольше.",
+    label: "Точная — рекомендуем",
+    hint: "multilingual-e5-small, около 120 МБ. Заметно лучше понимает синонимы; первый запуск дольше.",
   },
 ];
 
 export const DEFAULT_SEARCH_PREFERENCES = {
   mode: "smart",
-  model: "compact",
+  model: "powerful",
 };
 
 const MODE_VALUES = new Set(SEARCH_MODES.map((option) => option.value));

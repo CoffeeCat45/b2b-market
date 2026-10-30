@@ -167,11 +167,16 @@ export function cosineSimilarity(left, right) {
 }
 
 // Порог модели считаем «пограничным совпадением» (50%), 1.0 — полным (100%).
-export function getSemanticMatchPercent(similarity, threshold = 0) {
+// В режиме weak ниже порога продолжаем шкалу вниз: 0 → 0%, порог → 50%.
+export function getSemanticMatchPercent(similarity, threshold = 0, { weak = false } = {}) {
   if (!Number.isFinite(similarity)) return null;
 
   const min = Number.isFinite(threshold) ? Math.min(Math.max(threshold, 0), 0.99) : 0;
-  if (similarity < min) return null;
+  if (similarity < min) {
+    if (!weak) return null;
+    const weakRatio = min > 0 ? Math.min(Math.max(similarity, 0), min) / min : 0;
+    return Math.round(weakRatio * 50);
+  }
 
   const floor = min > 0 ? 50 : 0;
   const ratio = (Math.min(similarity, 1) - min) / (1 - min);

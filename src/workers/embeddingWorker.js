@@ -4,6 +4,8 @@ import {
   validateEmbeddingVector,
 } from "../../shared/embeddings.js";
 
+const MAX_PASSAGE_BATCH = 200;
+
 let transformers = null;
 let activeModel = null;
 let loadingModel = null;
@@ -107,28 +109,54 @@ async function handleLoad({ modelId }) {
   }
 }
 
+async function embedBatch(modelId, texts, { query = false } = {}) {
+  const model = getEmbeddingModel(modelId);
+  if (!model) throw new Error("Неизвестная модель эмбеддингов.");
+
+  const inputs = texts.map((text) => formatEmbeddingInput(modelId, text, { query }));
+  if (inputs.some((input) => !input)) throw new Error("Пустой текст для эмбеддинга.");
+
+  const extractor = await getExtractor(modelId);
+  const output = await extractor(inputs, { pooling: model.pooling, normalize: true });
+  const rows = output.tolist();
+  const list = Array.isArray(rows?.[0]) ? rows : [rows];
+
+  if (list.length !== texts.length) throw new Error("Модель вернула неверное число векторов.");
+
+  return list.map((row) => {
+    const validation = validateEmbeddingVector(row, modelId);
+    if (!validation.ok) throw new Error(validation.error);
+    return validation.value;
+  });
+}
+
 async function handleEmbed({ requestId, modelId, text }) {
   try {
-    const model = getEmbeddingModel(modelId);
-    if (!model) throw new Error("Неизвестная модель эмбеддингов.");
-
-    const input = formatEmbeddingInput(modelId, text, { query: true });
-    if (!input) throw new Error("Пустой поисковый запрос.");
-
-    const extractor = await getExtractor(modelId);
-    const output = await extractor(input, { pooling: model.pooling, normalize: true });
-    const rows = output.tolist();
-    const vector = Array.isArray(rows?.[0]) ? rows[0] : rows;
-    const validation = validateEmbeddingVector(vector, modelId);
-
-    if (!validation.ok) throw new Error(validation.error);
-    post({ type: "result", requestId, modelId, vector: validation.value });
+    const [vector] = await embedBatch(modelId, [String(text ?? "")], { query: true });
+    post({ type: "result", requestId, modelId, vector });
   } catch (error) {
     post({
       type: "error",
       requestId,
       modelId,
       message: error?.message || "Не удалось выполнить нейропоиск.",
+    });
+  }
+}
+
+async function handleEmbedPassages({ requestId, modelId, texts }) {
+  try {
+    if (!Array.isArray(texts) || !texts.length) throw new Error("Нет текстов для эмбеддинга.");
+    if (texts.length > MAX_PASSAGE_BATCH) throw new Error("Слишком много текстов для одного запроса.");
+
+    const vectors = await embedBatch(modelId, texts);
+    post({ type: "passages", requestId, modelId, vectors });
+  } catch (error) {
+    post({
+      type: "error",
+      requestId,
+      modelId,
+      message: error?.message || "Не удалось подготовить смысловые векторы.",
     });
   }
 }
@@ -142,9 +170,11 @@ self.addEventListener("message", (event) => {
     return;
   }
 
-  if (data.type !== "embed") return;
+  if (data.type !== "embed" && data.type !== "embedPassages") return;
 
-  queue = queue.then(() => handleEmbed(data)).catch((error) => {
+  const handler = data.type === "embedPassages" ? handleEmbedPassages : handleEmbed;
+
+  queue = queue.then(() => handler(data)).catch((error) => {
     post({
       type: "error",
       requestId: data.requestId,

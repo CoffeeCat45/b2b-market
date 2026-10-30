@@ -124,6 +124,16 @@ test("процент смыслового совпадения калибруе�
   assert.equal(getSemanticMatchPercent(1.2, 0.5), 100);
 });
 
+test("слабая шкала показывает совпадения ниже порога", () => {
+  assert.equal(getSemanticMatchPercent(0.5, 0.82, { weak: true }), 30);
+  assert.equal(getSemanticMatchPercent(0.41, 0.82, { weak: true }), 25);
+  assert.equal(getSemanticMatchPercent(0.25, 0.5, { weak: true }), 25);
+  assert.equal(getSemanticMatchPercent(0, 0.82, { weak: true }), 0);
+  assert.equal(getSemanticMatchPercent(-0.2, 0.82, { weak: true }), 0);
+  assert.equal(getSemanticMatchPercent(0.91, 0.82, { weak: true }), 75);
+  assert.equal(getSemanticMatchPercent(Number.NaN, 0.82, { weak: true }), null);
+});
+
 test("нормализация оценок приводит значения к диапазону 0..1", () => {
   const normalized = normalizeScoreMap(new Map([["a", 2], ["b", 4], ["c", 6]]));
   assert.equal(normalized.get("a"), 0);

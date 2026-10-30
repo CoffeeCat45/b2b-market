@@ -4,11 +4,13 @@ import Layout from "../components/Layout";
 import FilterSidebar from "../components/FilterSidebar";
 import CompanyCard from "../components/CompanyCard";
 import AsyncState from "../components/AsyncState";
+import SearchEmptyState from "../components/SearchEmptyState";
 import SearchSemanticStatus from "../components/SearchSemanticStatus";
 import { useAuth } from "../context/AuthContext";
 import { useMarketplaceData } from "../hooks/useMarketplaceData";
 import { useSearchPreferences } from "../hooks/useSearchPreferences";
 import { useSemanticSearch } from "../hooks/useSemanticSearch";
+import { saveSearchPreferences } from "../lib/searchPreferences";
 import { useEmbeddingModelPresence } from "../hooks/useEmbeddingModelPresence";
 import { DATE_FILTER_OPTIONS, matchesDateFilter, parseRussianDate } from "../lib/date";
 import { searchSuppliers } from "../../shared/search.js";
@@ -190,29 +192,51 @@ function SuppliersPage() {
   const modelPresence = useEmbeddingModelPresence(searchPreferences.model, neuralMode);
   const semanticThreshold = getEmbeddingModel(searchPreferences.model)?.semanticThreshold ?? 0;
 
+  const enableNeuralSearch = () => saveSearchPreferences({ ...searchPreferences, mode: "neural" });
+
+  const lexicalResults = useMemo(() => (
+    query.trim()
+      ? searchSuppliers(baseFilteredSuppliers, query)
+      : baseFilteredSuppliers.map((item) => ({ item, score: 0 }))
+  ), [baseFilteredSuppliers, query]);
+
+  const semanticStatus = semanticSearch.status;
+  const semanticReady = semanticStatus === "ready" || semanticStatus === "no-matches";
+  const semanticOnly = semanticEnabled
+    && semanticReady
+    && semanticSearch.scores.size > 0
+    && lexicalResults.length === 0;
+  const weakSemantic = semanticOnly && semanticStatus === "no-matches";
+
   const semanticMatchMap = useMemo(() => {
-    if (!semanticEnabled || semanticSearch.status !== "ready") return null;
+    if (!semanticEnabled || !semanticReady || !semanticSearch.scores.size) return null;
 
     const map = new Map();
     for (const [id, score] of semanticSearch.scores) {
-      const percent = getSemanticMatchPercent(score, semanticThreshold);
+      const strong = score >= semanticThreshold;
+      if (!semanticOnly && !strong) continue;
+      const percent = getSemanticMatchPercent(score, semanticThreshold, { weak: !strong });
       if (percent !== null) map.set(id, percent);
     }
-    return map;
-  }, [semanticEnabled, semanticSearch.status, semanticSearch.scores, semanticThreshold]);
+    return map.size ? map : null;
+  }, [semanticEnabled, semanticReady, semanticOnly, semanticSearch.scores, semanticThreshold]);
 
   const filteredSuppliers = useMemo(() => {
-    const lexicalResults = query.trim()
-      ? searchSuppliers(baseFilteredSuppliers, query)
-      : baseFilteredSuppliers.map((item) => ({ item, score: 0 }));
+    const useSemantic = semanticEnabled
+      && semanticSearch.scores.size > 0
+      && (semanticStatus === "ready" || semanticOnly);
 
-    const results = semanticEnabled && semanticSearch.status === "ready" && semanticSearch.scores.size
+    let results = useSemantic
       ? rankHybridResults(baseFilteredSuppliers, {
         lexicalScores: new Map(lexicalResults.map((entry) => [entry.item.id, entry.score])),
         semanticScores: semanticSearch.scores,
-        semanticThreshold: getEmbeddingModel(searchPreferences.model)?.semanticThreshold ?? 0,
+        semanticThreshold: semanticOnly ? 0 : semanticThreshold,
       })
       : lexicalResults;
+
+    if (semanticOnly) {
+      results = results.slice(0, 5);
+    }
 
     results.sort((a, b) => {
       if (sortBy === "compatibility" && compatibilityMap) {
@@ -239,7 +263,7 @@ function SuppliersPage() {
     });
 
     return results.map((entry) => entry.item);
-  }, [baseFilteredSuppliers, query, sortBy, compatibilityMap, semanticEnabled, semanticSearch.status, semanticSearch.scores, searchPreferences.model]);
+  }, [baseFilteredSuppliers, lexicalResults, sortBy, compatibilityMap, semanticEnabled, semanticOnly, semanticStatus, semanticSearch.scores, semanticThreshold]);
 
   const toggleCity = (city) => {
     setSelectedCities((current) => (current.includes(city) ? current.filter((item) => item !== city) : [...current, city]));
@@ -311,6 +335,7 @@ function SuppliersPage() {
                     modelStatus={semanticSearch.modelStatus}
                     presence={modelPresence.state}
                     presenceProgress={modelPresence.progress}
+                    weakResults={weakSemantic}
                     error={semanticSearch.error}
                   />
                   {filteredSuppliers.length ? (
@@ -360,13 +385,12 @@ function SuppliersPage() {
                       </div>
                     </>
                   ) : (
-                    <div className="empty-state card">
-                      <h2>Ничего не найдено</h2>
-                      <p>Попробуйте изменить запрос или сбросить фильтры.</p>
-                      <button type="button" className="button button-secondary" onClick={resetFilters}>
-                        Сбросить фильтры
-                      </button>
-                    </div>
+                    <SearchEmptyState
+                      neuralMode={neuralMode}
+                      hasQuery={Boolean(query.trim())}
+                      onEnableNeural={enableNeuralSearch}
+                      onReset={resetFilters}
+                    />
                   )}
                 </>
               )}

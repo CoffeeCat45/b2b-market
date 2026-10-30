@@ -1,11 +1,32 @@
-function getStatusText(status, modelStatus) {
-  if (status === "loading-index") return { tone: "loading", text: "Нейропоиск: загружаем смысловые векторы…" };
+function getStatusText(status, modelStatus, weakResults) {
+  if (status === "loading-index") {
+    if (modelStatus?.stage === "error") {
+      return { tone: "error", text: "Нейропоиск недоступен — используется обычный поиск." };
+    }
+
+    if (modelStatus?.stage === "loading") {
+      const progress = Number.isFinite(modelStatus.progress) ? Math.min(100, Math.max(0, modelStatus.progress)) : 0;
+      return {
+        tone: "loading",
+        text: progress > 0 ? `Нейропоиск: загружаем модель — ${progress}%.` : "Нейропоиск: загружаем модель…",
+        progress,
+      };
+    }
+
+    if (modelStatus?.stage === "ready") {
+      return { tone: "loading", text: "Нейропоиск: считаем смысловые векторы на устройстве…" };
+    }
+
+    return { tone: "loading", text: "Нейропоиск: загружаем смысловые векторы…" };
+  }
   if (status === "index-ready") return { tone: "loading", text: "Нейропоиск: готовим запрос…" };
   if (status === "empty") {
     return { tone: "muted", text: "Нейропоиск: векторы ещё не подготовлены — используется обычный поиск." };
   }
   if (status === "no-matches") {
-    return { tone: "muted", text: "Нейропоиск: смысловых совпадений не нашлось — используется обычный поиск." };
+    return weakResults
+      ? { tone: "muted", text: "Нейропоиск: точного совпадения нет — показываем ближайшие по смыслу." }
+      : { tone: "muted", text: "Нейропоиск: смысловых совпадений не нашлось — используется обычный поиск." };
   }
   if (status === "error") {
     return { tone: "error", text: "Нейропоиск недоступен — используется обычный поиск." };
@@ -63,11 +84,20 @@ function getPresenceText(presence, modelStatus, progress) {
   return null;
 }
 
-function SearchSemanticStatus({ enabled = false, active, status, modelStatus, presence = "unknown", presenceProgress = 0, error }) {
+function SearchSemanticStatus({
+  enabled = false,
+  active,
+  status,
+  modelStatus,
+  presence = "unknown",
+  presenceProgress = 0,
+  weakResults = false,
+  error,
+}) {
   if (!enabled) return null;
 
   const display = active
-    ? getStatusText(status, modelStatus)
+    ? getStatusText(status, modelStatus, weakResults)
     : getPresenceText(presence, modelStatus, presenceProgress);
   if (!display) return null;
 

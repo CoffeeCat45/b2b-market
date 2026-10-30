@@ -129,6 +129,27 @@ function handleWorkerMessage(event) {
     return;
   }
 
+  if (data.type === "passages") {
+    const request = pendingRequests.get(data.requestId);
+    if (!request) return;
+
+    const model = getEmbeddingModel(request.modelId);
+    const vectors = data.vectors;
+    const valid = model
+      && Array.isArray(vectors)
+      && vectors.length === request.count
+      && vectors.every((vector) => Array.isArray(vector) && vector.length === model.dimensions);
+
+    if (!valid) {
+      finishRequest(data.requestId, (current) => current.reject(new Error("Модель вернула векторы неверного размера.")));
+      return;
+    }
+
+    setStatus(request.modelId, { stage: "ready", progress: 100, message: "Модель готова." });
+    finishRequest(data.requestId, (current) => current.resolve(vectors));
+    return;
+  }
+
   if (data.type === "error") {
     if (data.modelId) {
       setStatus(data.modelId, {
@@ -249,5 +270,50 @@ export function embedQuery(modelId, text) {
     }
 
     activeWorker.postMessage({ type: "embed", requestId, modelId, text: normalized });
+  });
+}
+
+export function embedPassages(modelId, texts) {
+  const model = getEmbeddingModel(modelId);
+  if (!model) return Promise.reject(new Error("Неизвестная модель эмбеддингов."));
+
+  const normalized = (Array.isArray(texts) ? texts : []).map((text) => String(text ?? "").trim());
+  if (!normalized.length) return Promise.resolve([]);
+  if (normalized.some((text) => !text)) {
+    return Promise.reject(new Error("Пустой текст для эмбеддинга."));
+  }
+
+  let activeWorker;
+  try {
+    activeWorker = ensureWorker();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
+  const requestId = `passages-${nextRequestId}`;
+  nextRequestId += 1;
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      finishRequest(requestId, (current) => {
+        current.reject(new Error("Модель не успела обработать тексты. Попробуйте ещё раз."));
+      });
+    }, EMBEDDING_TIMEOUT_MS);
+
+    pendingRequests.set(requestId, {
+      resolve,
+      reject,
+      modelId,
+      cacheKey: null,
+      count: normalized.length,
+      timeoutId,
+    });
+
+    const currentStatus = getEmbeddingModelStatus(modelId);
+    if (currentStatus.stage !== "ready") {
+      setStatus(modelId, { stage: "loading", progress: currentStatus.progress || 0, message: "Готовим модель…" });
+    }
+
+    activeWorker.postMessage({ type: "embedPassages", requestId, modelId, texts: normalized });
   });
 }
