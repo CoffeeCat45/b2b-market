@@ -1,0 +1,8 @@
+/index.html
+  Cache-Control: no-cache
+/b2b-market/index.html
+  Cache-Control: no-cache
+/assets/*
+  Cache-Control: max-age=31536000, immutable
+/b2b-market/assets/*
+  Cache-Control: max-age=31536000, immutable

@@ -4,6 +4,7 @@ import { CONNECTION_RESTORED_EVENT } from "../lib/connection";
 import { useAuth } from "./AuthContext";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+export const MARKETPLACE_CACHE_TTL_MS = CACHE_TTL_MS;
 const EMPTY_DATA = { orders: [], suppliers: [], companies: [], updatedAt: 0 };
 
 export const MarketplaceDataContext = createContext(null);
@@ -129,6 +130,7 @@ export function MarketplaceDataProvider({ children }) {
         orders: data.orders,
         suppliers: data.suppliers,
         companies: data.companies,
+        updatedAt: data.updatedAt,
         loading,
         refreshing,
         error,

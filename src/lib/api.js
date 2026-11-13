@@ -1,11 +1,10 @@
 import { API_BASE } from "./apiBase";
-import { reportDbWaking, reportNetworkFailure, reportSuccess } from "./connection";
+import { reportDbWaking, reportNetworkFailure, reportSuccess, waitForOnline } from "./connection";
 
 // Общий helper для API держит auth-заголовки, timeout и форматирование ошибок бэкенда в одном месте.
 const API_TIMEOUT_MS = 20000;
 const DEFAULT_READ_RETRIES = 3;
 const RETRY_DELAY_MS = 700;
-const DB_WAKING_RETRY_DELAYS_MS = [2000, 3000, 5000, 8000, 10000, 10000, 10000, 10000];
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
 const SESSION_EXEMPT_PATHS = new Set([
   "/auth/login",
@@ -87,14 +86,11 @@ export async function apiFetch(path, options = {}) {
         reportDbWaking();
       }
 
-      if (dbWaking && shouldWaitForDb && dbWakingAttempt < DB_WAKING_RETRY_DELAYS_MS.length) {
-        const retryAfterMs = Number(data.retryAfterMs);
-        const delayMs =
-          Number.isFinite(retryAfterMs) && retryAfterMs > 0
-            ? Math.min(retryAfterMs, 10000)
-            : DB_WAKING_RETRY_DELAYS_MS[dbWakingAttempt];
+      if (dbWaking && shouldWaitForDb && dbWakingAttempt < 1) {
         window.clearTimeout(timeoutId);
-        await wait(delayMs);
+        // Ждём общее пробуждение БД и повторяем запрос один раз, а не цепочкой повторов.
+        const restored = await waitForOnline();
+        if (!restored) throw requestError;
         return apiFetch(path, { ...options, dbWakingAttempt: dbWakingAttempt + 1 });
       }
 
