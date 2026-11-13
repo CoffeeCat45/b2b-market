@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { API_BASE } from "./apiBase";
+import { failoverApiBase, getApiBase } from "./apiBase";
 
 const HEALTH_POLL_INTERVAL_MS = 3000;
 const HEALTH_TIMEOUT_MS = 5000;
@@ -63,7 +63,7 @@ async function checkHealth() {
   const timeoutId = window.setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${API_BASE}/health`, {
+    const response = await fetch(`${getApiBase()}/health`, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
@@ -71,8 +71,9 @@ async function checkHealth() {
     if (!response.ok) return;
     const data = await response.json().catch(() => null);
     if (data?.ready) setState("online");
-  } catch {
-    // Состояние не меняем: следующий тик опроса повторит проверку.
+  } catch (error) {
+    // Запрос не дошёл — возможно, маршрут API в этой сети не работает, пробуем запасной.
+    if (error instanceof TypeError) failoverApiBase();
   } finally {
     window.clearTimeout(timeoutId);
     pollInFlight = false;

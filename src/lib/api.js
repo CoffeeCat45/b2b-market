@@ -1,4 +1,4 @@
-import { API_BASE } from "./apiBase";
+import { failoverApiBase, getApiBase } from "./apiBase";
 import { reportDbWaking, reportNetworkFailure, reportSuccess, waitForOnline } from "./connection";
 
 // Общий helper для API держит auth-заголовки, timeout и форматирование ошибок бэкенда в одном месте.
@@ -61,7 +61,7 @@ export async function apiFetch(path, options = {}) {
   }
 
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(`${getApiBase()}${path}`, {
       ...fetchOptions,
       headers,
       signal: fetchOptions.signal || controller.signal,
@@ -111,6 +111,13 @@ export async function apiFetch(path, options = {}) {
     return data;
   } catch (error) {
     if (error?.name === "AbortError" || error instanceof TypeError) {
+      // Запрос не дошёл до сервера: в этой сети не работает выбранный маршрут API.
+      // Сначала один раз пробуем запасной, и только потом показываем сетевую ошибку.
+      if (error instanceof TypeError && failoverApiBase()) {
+        window.clearTimeout(timeoutId);
+        return apiFetch(path, { ...options, retries: remainingRetries });
+      }
+
       if (trackConnection) {
         reportNetworkFailure();
       }

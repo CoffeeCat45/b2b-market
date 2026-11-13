@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - develop
+  # Ручной перезапуск деплоя: Actions → Deploy to GitHub Pages → Run workflow.
+  workflow_dispatch:
 
 permissions:
   contents: read

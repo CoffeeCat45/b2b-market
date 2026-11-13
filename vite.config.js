@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { DIRECT_API_BASE } from "./shared/apiEndpoints.js";
 
 const packageJson = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 
@@ -24,6 +25,9 @@ function cspPlugin(apiBase) {
     },
     transformIndexHtml(html) {
       const apiOrigin = getApiOrigin(apiBase);
+      // Клиент при недоступном маршруте уходит на прямой API, поэтому он разрешён всегда —
+      // даже когда собранная сборка указывает на прокси.
+      const apiOrigins = [...new Set([apiOrigin, getApiOrigin(DIRECT_API_BASE)].filter(Boolean))];
       // Модель и WASM-движок скачиваются с Hugging Face и jsDelivr, а ONNX Runtime
       // кэширует WASM-фабрику как blob. Отсюда script-src blob: и worker-src blob:.
       const modelOrigins = [
@@ -34,7 +38,7 @@ function cspPlugin(apiBase) {
       ];
       const connectSources = [
         "'self'",
-        ...(apiOrigin ? [apiOrigin] : []),
+        ...apiOrigins,
         ...(isDev ? ["ws:"] : []),
         ...modelOrigins,
       ];
