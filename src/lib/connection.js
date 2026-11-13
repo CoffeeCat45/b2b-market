@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { failoverApiBase, getApiBase } from "./apiBase";
+import { apiBasesToProbe, useApiBase } from "./apiBase";
 
 const HEALTH_POLL_INTERVAL_MS = 3000;
 const HEALTH_TIMEOUT_MS = 5000;
@@ -56,26 +56,52 @@ function setState(nextState) {
   }
 }
 
-async function checkHealth() {
-  if (pollInFlight) return;
-  pollInFlight = true;
+async function probeHealth(base) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${getApiBase()}/health`, {
+    const response = await fetch(`${base}/health`, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
 
-    if (!response.ok) return;
+    if (!response.ok) return null;
     const data = await response.json().catch(() => null);
-    if (data?.ready) setState("online");
-  } catch (error) {
-    // Запрос не дошёл — возможно, маршрут API в этой сети не работает, пробуем запасной.
-    if (error instanceof TypeError) failoverApiBase();
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    // Запрос не дошёл: этот маршрут в данной сети не работает, пробуем следующий.
+    return null;
   } finally {
     window.clearTimeout(timeoutId);
+  }
+}
+
+// Опрос перебирает все маршруты API, начиная с текущего, и делает рабочим тот, что ответил.
+// Иначе заблокированный провайдером адрес (Render напрямую) оставал бы рабочим до бесконечности:
+// такой запрос не отбивается ошибкой сети, а висит до таймаута.
+async function checkHealth() {
+  if (pollInFlight) return;
+  pollInFlight = true;
+
+  try {
+    let aliveBase = null;
+
+    for (const base of apiBasesToProbe()) {
+      const data = await probeHealth(base);
+      if (!data) continue;
+
+      aliveBase = aliveBase || base;
+
+      if (data.ready) {
+        useApiBase(base);
+        setState("online");
+        return;
+      }
+    }
+
+    if (aliveBase) useApiBase(aliveBase);
+  } finally {
     pollInFlight = false;
   }
 }

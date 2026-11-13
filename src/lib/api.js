@@ -1,4 +1,4 @@
-import { failoverApiBase, getApiBase } from "./apiBase";
+import { failoverApiBase, getApiBase, markApiBaseWorking } from "./apiBase";
 import { reportDbWaking, reportNetworkFailure, reportSuccess, waitForOnline } from "./connection";
 
 // Общий helper для API держит auth-заголовки, timeout и форматирование ошибок бэкенда в одном месте.
@@ -67,6 +67,9 @@ export async function apiFetch(path, options = {}) {
       signal: fetchOptions.signal || controller.signal,
     });
 
+    // Любой HTTP-ответ означает, что маршрут в этой сети живой: запоминаем его для следующих загрузок.
+    markApiBaseWorking();
+
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
@@ -113,6 +116,8 @@ export async function apiFetch(path, options = {}) {
     if (error?.name === "AbortError" || error instanceof TypeError) {
       // Запрос не дошёл до сервера: в этой сети не работает выбранный маршрут API.
       // Сначала один раз пробуем запасной, и только потом показываем сетевую ошибку.
+      // Таймаут сам по себе маршрут не меняет: он случается и при холодном старте сервера,
+      // а живой адрес выбирает health-опрос, который перебирает все маршруты.
       if (error instanceof TypeError && failoverApiBase()) {
         window.clearTimeout(timeoutId);
         return apiFetch(path, { ...options, retries: remainingRetries });

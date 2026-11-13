@@ -1,7 +1,7 @@
 import { DIRECT_API_BASE, buildApiCandidates, normalizeApiBase } from "../../shared/apiEndpoints.js";
 
-// Выбор живёт в localStorage: у одного и того же браузера в разной сети работают разные маршруты,
-// а профиль компании к такому выбору не относится.
+// В localStorage пишем только подтверждённо живой маршрут (после ответа сервера).
+// Догадку о запасном маршруте не сохраняем: иначе браузер мог навсегда сесть на мёртвый адрес.
 const ACTIVE_BASE_KEY = "api_base_active";
 const LOCAL_API_BASE = "http://localhost:3000/api";
 
@@ -29,8 +29,45 @@ function readStoredIndex() {
 
 let activeIndex = readStoredIndex();
 
+function writeStoredIndex() {
+  try {
+    localStorage.setItem(ACTIVE_BASE_KEY, API_CANDIDATES[activeIndex]);
+  } catch {
+    // Приватный режим браузера: выбор останется в силе до перезагрузки страницы.
+  }
+}
+
+function removeStoredIndex() {
+  try {
+    localStorage.removeItem(ACTIVE_BASE_KEY);
+  } catch {
+    // Приватный режим браузера: ничего сохранять не нужно.
+  }
+}
+
 export function getApiBase() {
   return API_CANDIDATES[activeIndex];
+}
+
+// Все маршруты, начиная с текущего: по ним их перебирает health-опрос.
+export function apiBasesToProbe() {
+  return API_CANDIDATES.map(
+    (_, offset) => API_CANDIDATES[(activeIndex + offset) % API_CANDIDATES.length],
+  );
+}
+
+// Ответ сервера получен: маршрут живой, запоминаем его для следующих загрузок.
+export function markApiBaseWorking() {
+  writeStoredIndex();
+}
+
+export function useApiBase(base) {
+  const index = API_CANDIDATES.indexOf(normalizeApiBase(base));
+  if (index === -1) return false;
+
+  activeIndex = index;
+  writeStoredIndex();
+  return true;
 }
 
 export function failoverApiBase() {
@@ -38,12 +75,8 @@ export function failoverApiBase() {
 
   failoversLeft -= 1;
   activeIndex = (activeIndex + 1) % API_CANDIDATES.length;
-
-  try {
-    localStorage.setItem(ACTIVE_BASE_KEY, API_CANDIDATES[activeIndex]);
-  } catch {
-    // Приватный режим браузера: переключение останется в силе до перезагрузки страницы.
-  }
+  // Сохранённый выбор больше не подтверждён — следующий старт начнётся с основного маршрута.
+  removeStoredIndex();
 
   return true;
 }
