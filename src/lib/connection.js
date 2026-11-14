@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { apiBasesToProbe, useApiBase } from "./apiBase";
+import { API_CANDIDATES, apiBasesToProbe, getApiBase, useApiBase } from "./apiBase";
 
 const HEALTH_POLL_INTERVAL_MS = 3000;
 const HEALTH_TIMEOUT_MS = 5000;
@@ -153,6 +153,13 @@ export function waitForOnline(timeoutMs = DB_WAKE_WAIT_MS) {
 }
 
 if (typeof window !== "undefined") {
+  // Сохранённый в прошлом запасной маршрут мог устареть вместе с сетью: проверяем его сразу,
+  // иначе первая загрузка платит полным таймаутом запроса, прежде чем опрос вообще начнётся.
+  if (getApiBase() !== API_CANDIDATES[0]) {
+    setState("reconnecting");
+    void checkHealth();
+  }
+
   window.addEventListener("online", () => {
     setState("reconnecting");
     void checkHealth();
