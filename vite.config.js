@@ -25,8 +25,8 @@ function cspPlugin(apiBase) {
     },
     transformIndexHtml(html) {
       const apiOrigin = getApiOrigin(apiBase);
-      // Клиент при недоступном маршруте уходит на прямой API, поэтому он разрешён всегда —
-      // даже когда собранная сборка указывает на прокси.
+      // Прямой адрес API остаётся разрешённым и в сборке с прокси: без переменной API_BASE_URL
+      // клиент обращается именно к нему, и такая сборка не должна ловить блокировку CSP.
       const apiOrigins = [...new Set([apiOrigin, getApiOrigin(DIRECT_API_BASE)].filter(Boolean))];
       // Модель и WASM-движок скачиваются с Hugging Face и jsDelivr, а ONNX Runtime
       // кэширует WASM-фабрику как blob. Отсюда script-src blob: и worker-src blob:.

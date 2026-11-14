@@ -7,15 +7,12 @@ test("normalizeApiBase убирает завершающие слеши", () => 
   assert.equal(normalizeApiBase(null), "");
 });
 
-test("buildApiCandidates ставит основной адрес первым и не дублирует прямой", () => {
-  assert.deepEqual(buildApiCandidates("https://proxy.workers.dev/api/"), [
-    "https://proxy.workers.dev/api",
-    DIRECT_API_BASE,
-  ]);
+test("buildApiCandidates отдаёт один маршрут: основной адрес без запасного прямого", () => {
+  assert.deepEqual(buildApiCandidates("https://proxy.workers.dev/api/"), ["https://proxy.workers.dev/api"]);
   assert.deepEqual(buildApiCandidates(DIRECT_API_BASE), [DIRECT_API_BASE]);
 });
 
-test("buildApiCandidates отдаёт только прямой адрес, если основной не задан", () => {
+test("buildApiCandidates берёт прямой адрес, если основной не задан", () => {
   assert.deepEqual(buildApiCandidates(""), [DIRECT_API_BASE]);
   assert.deepEqual(buildApiCandidates(undefined), [DIRECT_API_BASE]);
 });
