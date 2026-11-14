@@ -1,64 +1,80 @@
-# Прокси API на Koyeb
+# Прокси API
 
-## Почему не Cloudflare
+## Что измерено (2026-11-14, Mac, VPN выключен, реальный Chrome)
 
-Замер с того же компьютера и той же сети (VPN выключен, 2026-11-14): `curl` получает
-`https://b2b-market-api.cosmocats08.workers.dev/api/health` за 0.3 с, а Chrome в этот же момент
-держит запросы к `*.workers.dev` и `speed.cloudflare.com` в pending бесконечно. Контроль в том же
-Chrome: `coffeecat45.github.io` и произвольный `*.koyeb.app` открываются. То есть браузеры этой сети
-до Cloudflare не проходят, и воркер на `workers.dev` для российских пользователей бесполезен —
-он лечил блокировку Render и упирался в блокировку Cloudflare.
+`curl` в этом классе задач врёт: он ходит по TCP и не видит помех, которые ловит браузер.
+Поэтому проверяли браузером — навигация и запросы `fetch` из страницы без CSP:
 
-Koyeb выбран потому, что доступность браузера проверена до деплоя: `*.koyeb.app` открывается.
+| Адрес | Браузер | `curl` |
+| --- | --- | --- |
+| `coffeecat45.github.io` (сам сайт) | 0.40 с | 0.51 с |
+| `speed.cloudflare.com` | 0.30 с | 0.38 с |
+| `*.netlify.app` | 0.30 с | — |
+| `app.netlify.com` (панель Netlify) | 0.40 с | — |
+| `*.koyeb.app` | 0.42 с | 0.48 с |
+| `supabase.co` | 0.21 с | — |
+| **`*.workers.dev` (нынешний прод-прокси)** | **не доходит, висит** | 0.30 с |
+| **`*.onrender.com` (база)** | **не доходит, висит** | таймаут |
+| `app.supabase.com` (панель Supabase) | не доходит, висит | — |
+| `*.vercel.app` | не доходит, висит | — |
 
-## Что делает прокси
+Вывод: блокируется не «весь Cloudflare», а именно `*.workers.dev` — то есть воркер из `cloudflare/`
+не мог заработать для этой аудитории ни при каких правках. Нужен хостинг, до которого доходит
+браузер и открывается панель управления. По замерам это **Netlify**.
 
-`proxy/server.js` — прозрачный прокси без единой зависимости: сохраняет метод, путь, query, заголовки
-и тело запроса, пересылает всё на Render и отдаёт ответ как есть, вместе с CORS-заголовками сервера.
-Секретов нет, адрес origin публичный, база и бэкенд не трогаются.
+## Основной вариант: Netlify, прокси = конфиг
 
-Проверено локально на искусственном origin: путь и query сохраняются, `Authorization` доходит,
-тело POST приходит целиком (включая кириллицу), `HEAD` возвращается без тела, `Access-Control-Allow-Origin`
-проксируется. Отдельная ветка — ответ не дошёл за `UPSTREAM_TIMEOUT_MS` (75 с): прокси отдаёт
-`504` с кодом `DB_WAKING`, и клиент ждёт пробуждения сервера общим health-опросом вместо красной ошибки.
+`netlify.toml` в корне репозитория уже описывает прокси:
 
-Hop-by-hop заголовки (`transfer-encoding`, `connection` и остальные) не переносятся: они относятся к одному
-соединению, и скопированный `chunked` ломает ответ в браузере.
-
-## Настройка (10 минут, бесплатно)
-
-1. Зайти на `https://app.koyeb.com` через GitHub.
-2. **Create Service → Web service**.
-3. Источник: **GitHub**, репозиторий `CoffeeCat45/b2b-market`, ветка `develop`.
-   Builder — **Docker**, путь к Dockerfile — `proxy/Dockerfile`.
-4. Регион и инстанс: любой европейский регион, тип инстанса — **Free**.
-5. Порт: **3000** с включённым **Public domain**; имя сервиса, например `b2b-market-api`
-   (если занято — любое другое, итоговый адрес всё равно брать из карточки сервиса).
-6. Health check (рекомендую, заодно не даёт Render уснуть): HTTP, порт 3000, путь `/api/health`.
-7. **Deploy Service** → скопировать адрес вида `https://<имя>.koyeb.app`.
-
-Дальше адрес попадает в сборку:
-
-```bash
-gh variable set API_BASE_URL --repo CoffeeCat45/b2b-market --body "https://<имя>.koyeb.app/api"
-gh workflow run "Deploy to GitHub Pages" --repo CoffeeCat45/b2b-market --ref develop
+```toml
+[[redirects]]
+  from = "/api/*"
+  to = "https://b2b-market-api.onrender.com/api/:splat"
+  status = 200
+  force = true
 ```
 
-Переменная `API_BASE_URL` уходит в `VITE_API_BASE_URL` при сборке, а `connect-src` в CSP генерируется
-из неё же (`vite.config.js`) — править код клиента для смены адреса не нужно.
+Редирект со статусом 200 — это прозрачное проксирование: Netlify пересылает метод, query и тело
+запроса и отдаёт ответ сервера как есть, вместе с CORS-заголовками Render. Своего кода нет,
+зависимостей нет, лимит бесплатного тарифа — 100 ГБ трафика в месяц.
 
-## Проверка
+### Шаги (5–7 минут)
+
+1. Открыть `https://app.netlify.com` → войти через GitHub (карта не нужна).
+2. **Add new site → Import an existing project** → GitHub → репозиторий `CoffeeCat45/b2b-market`,
+   ветка `develop`.
+3. Build command `npm run build`, publish directory `dist` — подхватятся из `netlify.toml`,
+   менять ничего не нужно.
+4. **Deploy site** и дождаться сборки (первая — пара минут).
+5. Site details → **Change site name** → например `b2b-market-api` → адрес станет
+   `https://b2b-market-api.netlify.app`.
+6. Прийти сюда и сказать этот адрес. Дальше я меняю репозиторную переменную `API_BASE_URL` на
+   `https://b2b-market-api.netlify.app/api`, перезапускаю сборку Pages и проверяю сайт в браузере
+   без VPN. Переменная уходит в `VITE_API_BASE_URL`, а `connect-src` в CSP генерируется из неё
+   (`vite.config.js`) — правки в коде клиента не нужны.
+
+### Что обязательно проверим после деплоя
+
+- `https://<сайт>.netlify.app/api/health` — что прокси вообще отвечает;
+- `https://<сайт>.netlify.app/api/companies` с заголовком `Origin: https://coffeecat45.github.io` —
+  что CORS-заголовок от Render пришёл через прокси. Если Netlify съест `Access-Control-Allow-Origin`,
+  лечится в одну строку: `[redirects.headers] Access-Control-Allow-Origin = "https://coffeecat45.github.io"`.
+
+## Запасной вариант: Node-приложение
+
+`proxy/server.js` — прозрачный прокси на чистом Node (без зависимостей) + `proxy/Dockerfile` для
+любого хостинга контейнеров (Koyeb, Fly, Railway). Годится, если Netlify не устроит.
+Локально проверено на искусственном origin: метод, путь, query, `Authorization`, тело POST с кириллицей
+и `HEAD` проходят как надо, CORS-заголовки сервера переносятся, hop-by-hop (`transfer-encoding` и
+прочие, относящиеся к одному соединению) отбрасываются. Если ответ не дошёл за `UPSTREAM_TIMEOUT_MS`
+(75 с), прокси отдаёт `504` с кодом `DB_WAKING` — клиент ждёт пробуждения сервера общим health-опросом,
+а не показывает красную ошибку.
 
 ```bash
-curl -sS -o /dev/null -w 'code=%{http_code} t=%{time_total}s\n' https://<имя>.koyeb.app/api/health
-curl -sS -o /dev/null -w 'code=%{http_code} size=%{size_download} acao=%header{access-control-allow-origin}\n' \
-  -H 'Origin: https://coffeecat45.github.io' https://<имя>.koyeb.app/api/companies
+cd proxy && PORT=3999 UPSTREAM_ORIGIN=https://b2b-market-api.onrender.com node server.js
 ```
 
-Первый запрос может идти минуту — Render на бесплатном тарифе просыпается. Основной тест — не `curl`,
-а браузер в той сети, где сайт не работал: открыть сайт без VPN и дождаться каталога.
+## Почему не «перенести всё с Render»
 
-## Запасной вариант
-
-Если Koyeb не даст собрать из репозитория, тот же код публикуется как Docker-образ через GitHub Actions
-(`ghcr.io`), а в Koyeb выбирается «Deploy from a public Docker image». Файлы для этого не меняются.
+Это тоже решает холодный старт, но трогает прод: перенос переменных, секретов и пулера Supabase.
+Как отдельное решение — после того как сайт заработает без VPN.
