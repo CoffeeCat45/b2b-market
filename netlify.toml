@@ -11,6 +11,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Netlify раздаёт сайт из корня, а GitHub Pages — из подпапки /b2b-market/.
+  VITE_BASE_PATH = "/"
 
 [[redirects]]
   from = "/api/*"

@@ -72,7 +72,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), cspPlugin(apiBase)],
-    base: "/b2b-market/",
+    // GitHub Pages раздаёт проект из подпапки /b2b-market/, Netlify — из корня: без этой переменной
+    // копия сайта на Netlify ссылается на несуществующие ассеты и показывает пустую страницу.
+    base: env.VITE_BASE_PATH || "/b2b-market/",
     worker: {
       format: "es",
     },
