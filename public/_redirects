@@ -1,0 +1,3 @@
+# Прозрачный прокси /api/* на Render. Работает и при Git-деплое, и при «Upload your project files»:
+# Netlify читает этот файл из корня раздачи, netlify.toml для ручной загрузки не обязателен.
+/api/* https://b2b-market-api.onrender.com/api/:splat 200

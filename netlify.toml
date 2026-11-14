@@ -2,8 +2,9 @@
 # Браузеры в этой сети не проходят к *.workers.dev (замер 2026-11-14), а *.netlify.app отвечают
 # за треть секунды, поэтому адрес API вида https://<сайт>.netlify.app/api работает без VPN.
 #
-# Прокси сделан редиректом со статусом 200: Netlify сам пересылает метод, query и тело запроса
-# и отдаёт ответ сервера как есть, включая CORS-заголовки Render. Код для этого не нужен.
+# Само проксирование описано в public/_redirects: Netlify пересылает метод, query и тело запроса
+# и отдаёт ответ сервера как есть, включая CORS-заголовки Render. Файл читается и при Git-деплое,
+# и при ручной загрузке папки, поэтому правила намеренно не дублируются здесь.
 
 [build]
   command = "npm run build"
@@ -13,9 +14,3 @@
   NODE_VERSION = "22"
   # Netlify раздаёт сайт из корня, а GitHub Pages — из подпапки /b2b-market/.
   VITE_BASE_PATH = "/"
-
-[[redirects]]
-  from = "/api/*"
-  to = "https://b2b-market-api.onrender.com/api/:splat"
-  status = 200
-  force = true
