@@ -6,9 +6,14 @@ const ACTIVE_BASE_KEY = "api_base_active";
 const LOCAL_API_BASE = "http://localhost:3000/api";
 
 const builtBase = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
+// Относительный адрес означает «API на домене самой страницы»: так копия сайта на Netlify ходит
+// в свой же прокси из public/_redirects и не зависит от того, какое имя сайта выдал Netlify.
+const pageBase = builtBase.startsWith("/")
+  ? normalizeApiBase(new URL(builtBase, window.location.origin).href)
+  : builtBase;
 // Дев-сборка без .env остаётся на локальном сервере: иначе фолбэк уводил бы правки в прод.
 export const API_CANDIDATES =
-  import.meta.env.DEV && !builtBase ? [LOCAL_API_BASE] : buildApiCandidates(builtBase || DIRECT_API_BASE);
+  import.meta.env.DEV && !pageBase ? [LOCAL_API_BASE] : buildApiCandidates(pageBase || DIRECT_API_BASE);
 
 // Одно переключение на загрузку страницы: если не работает и второй маршрут, сеть недоступна целиком,
 // и гонять запросы между адресами смысла нет.
