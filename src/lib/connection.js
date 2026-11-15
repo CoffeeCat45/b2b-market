@@ -30,7 +30,7 @@ function syncPolling() {
     }, HEALTH_POLL_INTERVAL_MS);
   }
 
-  // Провайдер замедляет каждое новое соединение к краю Netlify, поэтому держим соединение тёплым.
+  // Пока вкладка открыта, редкий health-запрос не даёт Render уснуть и держит соединение с прокси тёплым.
   if (state === "online") {
     if (!keepaliveTimer) {
       keepaliveTimer = window.setInterval(() => {
