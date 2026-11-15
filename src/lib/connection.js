@@ -4,6 +4,7 @@ import { API_CANDIDATES, apiBasesToProbe, getApiBase, useApiBase } from "./apiBa
 const HEALTH_POLL_INTERVAL_MS = 3000;
 const HEALTH_TIMEOUT_MS = 5000;
 const DB_WAKE_WAIT_MS = 90000;
+const KEEPALIVE_INTERVAL_MS = 45000;
 export const CONNECTION_RESTORED_EVENT = "connection:restored";
 
 const listeners = new Set();
@@ -11,6 +12,7 @@ const onlineWaiters = new Set();
 let state = typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "online";
 let pollTimer = null;
 let pollInFlight = false;
+let keepaliveTimer = null;
 
 function emit() {
   listeners.forEach((listener) => listener());
@@ -22,13 +24,22 @@ function syncPolling() {
       window.clearInterval(pollTimer);
       pollTimer = null;
     }
-    return;
-  }
-
-  if (!pollTimer) {
+  } else if (!pollTimer) {
     pollTimer = window.setInterval(() => {
       void checkHealth();
     }, HEALTH_POLL_INTERVAL_MS);
+  }
+
+  // Провайдер замедляет каждое новое соединение к краю Netlify, поэтому держим соединение тёплым.
+  if (state === "online") {
+    if (!keepaliveTimer) {
+      keepaliveTimer = window.setInterval(() => {
+        void probeHealth(getApiBase());
+      }, KEEPALIVE_INTERVAL_MS);
+    }
+  } else if (keepaliveTimer) {
+    window.clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
   }
 }
 
@@ -153,6 +164,7 @@ export function waitForOnline(timeoutMs = DB_WAKE_WAIT_MS) {
 }
 
 if (typeof window !== "undefined") {
+  syncPolling();
   // Сохранённый в прошлом запасной маршрут мог устареть вместе с сетью: проверяем его сразу,
   // иначе первая загрузка платит полным таймаутом запроса, прежде чем опрос вообще начнётся.
   if (getApiBase() !== API_CANDIDATES[0]) {
